@@ -1,0 +1,64 @@
+# Python 관련 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node.js 관련 파일
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.node_repl_history
+*.tgz
+.yarn-integrity
+.env
+.env.*
+
+# 진단 보고서
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# 프로젝트 특정 - 민감한 정보
+client_secret.json
+credentials.json
+service-account-key.json
+*.key
+*.pem
+
+# 오디오 파일
+*.wav
+*.raw
+
+# 운영체제 관련 파일
+.DS_Store
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 에디터 디렉토리 및 파일
+.idea/
+.vscode/
+*.swp
+*.swo
+
