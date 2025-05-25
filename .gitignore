@@ -34,6 +34,12 @@ yarn-error.log*
 .yarn-integrity
 .env
 .env.*
+package-lock.json
+
+# Docker
+Dockerfile
+.dockerignore
+get-docker.sh
 
 # 진단 보고서
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
@@ -41,9 +47,11 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # 프로젝트 특정 - 민감한 정보
 client_secret.json
 credentials.json
+credentials_serviceAccount.json
 service-account-key.json
 *.key
 *.pem
+tokens.json
 
 # 오디오 파일
 *.wav

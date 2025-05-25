@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>스마트미러</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #000;
+      color: #fff;
+      text-align: center;
+      padding: 30px;
+    }
+    .weather {
+      font-size: 1.5rem;
+    }
+    .temp {
+      font-size: 3rem;
+      font-weight: bold;
+    }
+    #assistant-response {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px 30px;
+      border-radius: 10px;
+      font-size: 1.2rem;
+      display: none;
+      animation: fadeInOut 4s forwards;
+      max-width: 90%;
+      white-space: pre-wrap;
+    }
+    button {
+      margin-top: 30px;
+      padding: 15px 25px;
+      font-size: 1rem;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    @keyframes fadeInOut {
+      0% { opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { opacity: 0; display: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>오늘의 날씨</h1>
+  <div class="weather" id="weather">
+    불러오는 중...
+  </div>
+
+  <button id="ask-button">🎤 질문하기</button>
+  <div id="assistant-response"></div>
+
+  <script>
+    async function fetchWeather() {
+      try {
+        const res = await fetch('/api/weather');
+        const data = await res.json();
+        document.getElementById('weather').innerHTML = `
+          <div>${data.name}</div>
+          <div class="temp">${data.main.temp}°C</div>
+          <div>${data.weather[0].description}</div>
+        `;
+      } catch (err) {
+        document.getElementById('weather').textContent = '날씨 정보를 불러올 수 없습니다.';
+      }
+    }
+
+    function showAssistantResponse(text) {
+      const el = document.getElementById('assistant-response');
+      el.textContent = text;
+      el.style.display = 'block';
+      el.classList.remove('fadeOut');
+      void el.offsetWidth;
+      el.classList.add('fadeInOut');
+    }
+
+    async function activateAssistant() {
+      showAssistantResponse('🎙️ 듣는 중...');
+      try {
+        const res = await fetch('/api/assistant');
+        const data = await res.json();
+        showAssistantResponse(`🤖 ${data.response}`);
+      } catch (err) {
+        showAssistantResponse('❌ 오류 발생: 어시스턴트 실패');
+        console.error(err);
+      }
+    }
+
+    fetchWeather();
+    document.getElementById('ask-button').addEventListener('click', activateAssistant);
+  </script>
+</body>
+</html>
+
