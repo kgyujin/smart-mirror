@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>스마트미러</title>
   <style>
     body {
@@ -49,15 +49,20 @@
       90% { opacity: 1; }
       100% { opacity: 0; display: none; }
     }
+    .note {
+      margin-top: 20px;
+      color: #aaa;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
   <h1>오늘의 날씨</h1>
-  <div class="weather" id="weather">
-    불러오는 중...
-  </div>
+  <div class="weather" id="weather">불러오는 중...</div>
 
-  <button id="ask-button">🎤 질문하기</button>
+  <p class="note">Assistant를 사용하려면 버튼을 누르고 "오케이 구글" 또는 "ok google"이라고 말하세요.</p>
+
+  <button id="ask-button">어시스턴트 호출</button>
   <div id="assistant-response"></div>
 
   <script>
@@ -80,18 +85,18 @@
       el.textContent = text;
       el.style.display = 'block';
       el.classList.remove('fadeOut');
-      void el.offsetWidth;
+      void el.offsetWidth; // reflow for animation restart
       el.classList.add('fadeInOut');
     }
 
     async function activateAssistant() {
-      showAssistantResponse('🎙️ 듣는 중...');
+      showAssistantResponse('? 듣는 중...\n"오케이 구글" 또는 "ok google"이라고 말하세요');
       try {
         const res = await fetch('/api/assistant');
         const data = await res.json();
-        showAssistantResponse(`🤖 ${data.response}`);
+        showAssistantResponse(`${data.response}`);
       } catch (err) {
-        showAssistantResponse('❌ 오류 발생: 어시스턴트 실패');
+        showAssistantResponse('? 오류 발생: 어시스턴트 실패');
         console.error(err);
       }
     }
@@ -101,4 +106,3 @@
   </script>
 </body>
 </html>
-
