@@ -54,11 +54,22 @@
       color: #aaa;
       font-size: 0.9rem;
     }
+    .time {
+      font-size: 2rem;
+      margin-top: 10px;
+    }
+    .date {
+      font-size: 1.2rem;
+      margin-top: 5px;
+      color: #ccc;
+    }
   </style>
 </head>
 <body>
   <h1>오늘의 날씨</h1>
   <div class="weather" id="weather">불러오는 중...</div>
+  <div class="time" id="time">시간 불러오는 중...</div>
+  <div class="date" id="date">날짜 불러오는 중...</div>
 
   <p class="note">Assistant를 사용하려면 버튼을 누르고 "오케이 구글" 또는 "ok google"이라고 말하세요.</p>
 
@@ -66,6 +77,22 @@
   <div id="assistant-response"></div>
 
   <script>
+    async function fetchTime() {
+      try {
+        const res = await fetch('/api/time');
+        const data = await res.json();
+        document.getElementById('time').textContent = data.time;
+        document.getElementById('date').textContent = data.date;
+      } catch (err) {
+        document.getElementById('time').textContent = '시간 정보를 불러올 수 없습니다.';
+        document.getElementById('date').textContent = '날짜 정보를 불러올 수 없습니다.';
+      }
+    }
+  
+    // 초기 호출 + 1분마다 갱신
+    fetchTime();
+    setInterval(fetchTime, 60000);
+    
     async function fetchWeather() {
       try {
         const res = await fetch('/api/weather');

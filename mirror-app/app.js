@@ -479,6 +479,54 @@ app.get('/api/assistant', async (req, res) => {
   }
 });
 
+// 현재 시간/날짜 제공 API
+/*
+app.get('/api/time', (req, res) => {
+  const now = new Date();
+
+  // 한국 시간(KST) 기준
+  // const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000)); // UTC +9
+
+  const hours = kstNow.getHours();
+  const minutes = kstNow.getMinutes();
+  const isAM = hours < 12;
+  const hourDisplay = hours % 12 === 0 ? 12 : hours % 12;
+  const formattedTime = `오${isAM ? '전' : '후'} ${hourDisplay}:${minutes.toString().padStart(2, '0')}`;
+
+  const year = kstNow.getFullYear();
+  const month = (kstNow.getMonth() + 1).toString().padStart(2, '0');
+  const day = kstNow.getDate().toString().padStart(2, '0');
+  const weekday = ['일', '월', '화', '수', '목', '금', '토'][kstNow.getDay()];
+  const formattedDate = `${year}년 ${month}월 ${day}일 (${weekday})`;
+
+  res.json({
+    time: formattedTime,
+    date: formattedDate
+  });
+});
+*/
+
+app.get('/api/time', (req, res) => {
+  const now = new Date();
+
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const isAM = hours < 12;
+  const hourDisplay = hours % 12 === 0 ? 12 : hours % 12;
+  const formattedTime = `오${isAM ? '전' : '후'} ${hourDisplay}:${minutes.toString().padStart(2, '0')}`;
+
+  const year = now.getFullYear();
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  const weekday = ['일', '월', '화', '수', '목', '금', '토'][now.getDay()];
+  const formattedDate = `${year}년 ${month}월 ${day}일 (${weekday})`;
+
+  res.json({
+    time: formattedTime,
+    date: formattedDate
+  });
+});
+
 // 헬스체크 엔드포인트
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();
