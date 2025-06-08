@@ -147,33 +147,38 @@ const createOAuth2Credentials = async () => {
 // Google Assistant gRPC 클라이언트 생성
 const createAssistantClient = async () => {
   try {
-    const packageDefinition = protoLoader.loadSync('embedded_assistant.proto', {
+    const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
       keepCase: true,
       longs: String,
       enums: String,
       defaults: true,
       oneofs: true,
       includeDirs: [
-        path.join(__dirname, 'google/assistant/embedded/v1alpha2'),
+        path.join(__dirname), // 현재 디렉토리
         path.join(__dirname, 'google'),
-        path.join(__dirname)
-      ]
+        path.join(__dirname, 'google/assistant/embedded/v1alpha2'),
+      ],
     });
-    
+
     const assistantProto = grpc.loadPackageDefinition(packageDefinition);
+
+    // 구조 검증
+    const assistantConstructor = assistantProto?.google?.assistant?.embedded?.v1alpha2?.EmbeddedAssistant;
+    if (!assistantConstructor) {
+      throw new Error('[FATAL] assistantProto 구조 로딩 실패: EmbeddedAssistant 없음');
+    }
+
     const { credentials } = await createOAuth2Credentials();
-    
-    const client = new assistantProto.google.assistant.embedded.v1alpha2.EmbeddedAssistant(
-      ASSISTANT_ENDPOINT,
-      credentials
-    );
-    
+
+    const client = new assistantConstructor(ASSISTANT_ENDPOINT, credentials);
+
     return client;
   } catch (error) {
     log.error('Assistant 클라이언트 생성 오류:', error);
     throw error;
   }
 };
+
 
 // 개선된 Google Assistant 대화 함수
 const conversateWithAssistant = async (audioData, query) => {
