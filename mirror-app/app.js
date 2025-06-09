@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
@@ -11,7 +13,7 @@ const wav = require('wav');
 const { exec } = require('child_process');
 
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT;
 
 // ========== 로그 제어 설정 ==========
 const LOG_LEVELS = {
@@ -38,8 +40,8 @@ const log = {
   tts: (msg, ...args) => ENABLE_TTS_LOGS && console.log(`[TTS] ${msg}`, ...args)
 };
 
-const WEATHER_API_KEY = 'f6c4d3e4478abac841a6401b7d23bdba';
-const CITY_ID = '1835848';
+const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
+const CITY_ID = process.env.CITY_ID;
 const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, 'tokens.json');
 const SPEECH_CREDENTIALS_PATH = path.join(__dirname, 'credentials_serviceAccount.json');
