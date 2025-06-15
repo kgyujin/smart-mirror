@@ -120,6 +120,15 @@ const convertAudioToText = async (audioBuffer) => {
   }
 };
 
+// 뉴스 관련 질의 감지 함수 추가
+const isNewsQuery = (query) => {
+  const newsKeywords = [
+    '뉴스', '오늘 뉴스', '오늘의 뉴스', '어제 뉴스', '주요 뉴스', '속보',
+    '정치 뉴스', '경제 뉴스', '사회 뉴스', '국제 뉴스', '연예 뉴스', '스포츠 뉴스'
+  ];
+  return newsKeywords.some(kw => query.includes(kw));
+};
+
 // OAuth2 토큰 기반 gRPC credentials 생성
 const createOAuth2Credentials = async () => {
   try {
@@ -440,6 +449,28 @@ app.get('/api/assistant', async (req, res) => {
           const query = transcription.replace(/ok google|오케이 구글/gi, '').trim();
           log.info('추출된 쿼리:', query);
 
+          if (isNewsQuery(query)) {
+            try {
+              const newsRes = await axios.post(`http://localhost:${PORT}/api/news`, { query });
+              const newsResponse = newsRes.data.response || '뉴스 정보를 불러올 수 없습니다.';
+              log.info('뉴스 직접 응답:', newsResponse);
+              safeTTS(newsResponse);
+              return sendResponse({
+                response: newsResponse,
+                success: true,
+                source: 'rss_news_direct',
+                query
+              });
+            } catch (e) {
+              log.error('뉴스 직접 처리 실패:', e);
+              return sendResponse({
+                error: '뉴스 정보를 가져오는 데 실패했습니다.',
+                source: 'rss_news_direct',
+                query
+              });
+            }
+          }
+
           try {
             const audioBuffer = fs.readFileSync(outputPath);
             const pcmData = audioBuffer.slice(44);
@@ -527,6 +558,115 @@ app.get('/api/time', (req, res) => {
     time: formattedTime,
     date: formattedDate
   });
+});
+
+app.get('/api/news', async (req, res) => {
+  const rssParser = new (require('rss-parser'))();
+  const rssUrl = 'https://www.yna.co.kr/rss/news.xml';
+
+  try {
+    const feed = await rssParser.parseURL(rssUrl);
+    const articles = feed.items.slice(0, 5).map(item => ({
+      title: item.title,
+      link: item.link,
+      pubDate: item.pubDate,
+    }));
+    res.json({ articles });
+  } catch (err) {
+    log.error('뉴스 불러오기 실패:', err);
+    res.status(500).json({ error: '뉴스 정보를 가져오는 데 실패했습니다.' });
+  }
+});
+
+const RSSParser = require('rss-parser');
+const rssParser = new RSSParser();
+app.post('/api/news', async (req, res) => {
+  const userQuery = (req.body.query || '').toLowerCase();
+  const rssMap = {
+    latest: 'https://www.yna.co.kr/rss/news.xml',
+    politics: 'https://www.yna.co.kr/rss/politics.xml',
+    northkorea: 'https://www.yna.co.kr/rss/northkorea.xml',
+    economy: 'https://www.yna.co.kr/rss/economy.xml',
+    market: 'https://www.yna.co.kr/rss/market.xml',
+    industry: 'https://www.yna.co.kr/rss/industry.xml',
+    society: 'https://www.yna.co.kr/rss/society.xml',
+    local: 'https://www.yna.co.kr/rss/local.xml',
+    international: 'https://www.yna.co.kr/rss/international.xml',
+    culture: 'https://www.yna.co.kr/rss/culture.xml',
+    health: 'https://www.yna.co.kr/rss/health.xml',
+    entertainment: 'https://www.yna.co.kr/rss/entertainment.xml',
+    sports: 'https://www.yna.co.kr/rss/sports.xml',
+    opinion: 'https://www.yna.co.kr/rss/opinion.xml',
+    people: 'https://www.yna.co.kr/rss/people.xml',
+  };
+
+  const categoryKeywords = {
+    politics: ['정치'],
+    northkorea: ['북한'],
+    economy: ['경제'],
+    market: ['마켓', '증시'],
+    industry: ['산업'],
+    society: ['사회'],
+    local: ['지역', '전국'],
+    international: ['세계', '국제'],
+    culture: ['문화'],
+    health: ['건강'],
+    entertainment: ['연예', '엔터테인먼트'],
+    sports: ['스포츠', '운동'],
+    opinion: ['오피니언', '사설'],
+    people: ['사람들'],
+  };
+
+  // 쿼리에서 카테고리 추론
+  let category = null;
+  for (const [key, keywords] of Object.entries(categoryKeywords)) {
+    if (keywords.some(k => userQuery.includes(k))) {
+      category = key;
+      break;
+    }
+  }
+  
+  // 매칭되는 카테고리가 없으면 에러 응답
+  if (!category) {
+    return res.status(200).json({
+      response: `죄송합니다. '${userQuery}'는 지원되지 않는 뉴스 주제입니다. 정치, 경제, 사회, 연예, 스포츠 등만 지원됩니다.`,
+      category: null
+    });
+  }
+  
+  const rssUrl = rssMap[category];
+  
+  try {
+    const feed = await rssParser.parseURL(rssUrl);
+    const topItems = feed.items.slice(0, 3);
+    const spokenList = topItems.map((item, i) => `(${i + 1}) ${item.title}`).join(' ');
+    
+    const categoryNames = {
+      latest: '오늘의 주요 뉴스',
+      politics: '정치 뉴스',
+      northkorea: '북한 관련 뉴스',
+      economy: '경제 뉴스',
+      market: '증시 뉴스',
+      industry: '산업 뉴스',
+      society: '사회 뉴스',
+      local: '지역 뉴스',
+      international: '국제 뉴스',
+      culture: '문화 뉴스',
+      health: '건강 뉴스',
+      entertainment: '연예 뉴스',
+      sports: '스포츠 뉴스',
+      opinion: '오피니언 뉴스',
+      people: '인물 뉴스',
+    };
+    
+    const categoryTitle = categoryNames[category] || '뉴스';
+    
+    const responseText = `${categoryTitle}입니다. ${spokenList}`;
+    res.json({ response: responseText, category });
+  } catch (error) {
+    log.error('뉴스 질문 처리 실패:', error);
+    res.status(500).json({ error: '뉴스 정보를 가져오는 데 실패했습니다.' });
+  }
 });
 
 // 헬스체크 엔드포인트
