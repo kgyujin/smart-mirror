@@ -1,195 +1,345 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>스마트미러</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Smart Mirror</title>
   <style>
+    :root {
+      --bg: #000;
+      --text: #e9eef5;
+      --muted: #9aa7b1;
+      --accent: #57c7ff;
+      --panel: rgba(255, 255, 255, 0.06);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --success: #3ddc97;
+      --warning: #ffd166;
+      --error: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
-      font-family: Arial, sans-serif;
-      background-color: #000;
-      color: #fff;
-      text-align: center;
-      padding: 30px;
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, 'Noto Sans KR', sans-serif;
+      letter-spacing: 0.1px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     }
-    .weather {
-      font-size: 1.5rem;
-    }
-    .temp {
-      font-size: 3rem;
-      font-weight: bold;
-    }
-    #assistant-response {
-      position: fixed;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
-      padding: 20px 30px;
-      border-radius: 10px;
-      font-size: 1.2rem;
-      display: none;
-      animation: fadeInOut 4s forwards;
-      max-width: 90%;
-      white-space: pre-wrap;
-    }
-    button {
-      margin-top: 30px;
-      padding: 15px 25px;
-      font-size: 1rem;
-      background-color: #1a73e8;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    @keyframes fadeInOut {
-      0% { opacity: 0; }
-      10% { opacity: 1; }
-      90% { opacity: 1; }
-      100% { opacity: 0; display: none; }
-    }
-    .note {
-      margin-top: 20px;
-      color: #aaa;
-      font-size: 0.9rem;
-    }
-    .time {
-      font-size: 2rem;
-      margin-top: 10px;
-    }
-    .date {
-      font-size: 1.2rem;
-      margin-top: 5px;
-      color: #ccc;
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { display: grid; grid-template-rows: auto 1fr auto; height: 100%; padding: 24px; gap: 24px; }
+    /* 기본: 세로(포트레이트) 우선 레이아웃 */
+    .top { display: grid; grid-template-columns: 1fr; gap: 24px; align-items: start; }
+    .middle { display: grid; grid-template-columns: 1fr; gap: 24px; }
+    .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px; padding: 16px 18px; backdrop-filter: blur(6px); }
+    .panel h2 { margin: 0 0 12px 0; font-size: 18px; color: var(--muted); font-weight: 600; }
+
+    /* DateTime */
+    #dateTime .time { font-size: 84px; font-weight: 700; line-height: 1; }
+    #dateTime .date { font-size: 22px; color: var(--muted); margin-top: 6px; }
+    #advice { margin-top: 14px; font-size: 18px; color: var(--success); }
+
+    /* Weather */
+    #weather .temp { font-size: 48px; font-weight: 700; }
+    #weather .desc { color: var(--muted); margin-left: 8px; }
+    #weather .meta { margin-top: 8px; color: var(--muted); font-size: 14px; }
+
+    /* List */
+    .list { display: grid; gap: 10px; }
+    .item { padding: 10px 12px; border: 1px solid var(--panel-border); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .item:hover { background: rgba(255, 255, 255, 0.06); }
+    .item .left { display: flex; gap: 10px; align-items: baseline; }
+    .item .time { color: var(--muted); font-size: 14px; }
+    .item .title { font-weight: 600; }
+
+    /* Bottom */
+    .bottom { position: relative; }
+    #captions { position: fixed; left: 24px; right: 24px; bottom: 88px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+    .caption { background: rgba(0,0,0,0.55); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; max-width: 80%; transition: opacity .4s ease; }
+    .caption.user { align-self: flex-start; }
+    .caption.assistant { align-self: flex-end; }
+    .caption .role { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    .caption .text { font-size: 18px; }
+    .caption.ephemeral { opacity: 0.8; }
+
+    .controls { position: fixed; left: 24px; right: 24px; bottom: 24px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+    .pill { padding: 8px 12px; border-radius: 999px; border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); }
+    .btn { cursor: pointer; }
+    .btn:hover { filter: brightness(1.2); }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot-on { background: var(--success); }
+    .dot-off { background: var(--error); }
+
+    /* Listening window progress */
+    #listenBar { position: fixed; left: 24px; right: 24px; bottom: 72px; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+    #listenBar > span { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #7ef0ff); transition: width .2s ease; }
+
+    /* 가로(랜드스케이프)에서는 2열 그리드로 확장 */
+    @media (orientation: landscape) {
+      .top, .middle { grid-template-columns: 1fr 1fr; }
+      #dateTime .time { font-size: 72px; }
     }
   </style>
 </head>
 <body>
-  <div class="time" id="time">시간 불러오는 중...</div>
-  <div class="date" id="date">날짜 불러오는 중...</div>
-  <div class="weather" id="weather">불러오는 중...</div>
-  <h1>오늘의 뉴스</h1>
-  <ul id="news-list" style="
-    list-style: none;
-    padding-left: 0;
-    text-align: left;
-    max-width: 600px;
-    margin: 0 auto;
-    font-family: 'Arial', sans-serif;
-  "></ul>
-  
-  <hr>
-  
-  <p class="note">Assistant를 사용하려면 버튼을 누르고 "오케이 구글" 또는 "ok google"이라고 말하세요.</p>
+  <div class="container">
+    <div class="top">
+      <div id="dateTime" class="panel">
+        <div class="time" id="time">--:--</div>
+        <div class="date" id="date">--</div>
+        <div class="advice" id="advice">조언을 준비 중...</div>
+      </div>
+      <div id="weather" class="panel">
+        <h2>현재 날씨</h2>
+        <div>
+          <span class="temp" id="temp">--°C</span>
+          <span class="desc" id="weatherDesc"></span>
+        </div>
+        <div class="meta" id="weatherMeta"></div>
+      </div>
+    </div>
 
-  <button id="ask-button">어시스턴트 호출</button>
-  <div id="assistant-response"></div>
+    <div class="middle">
+      <div id="calendar" class="panel">
+        <h2>오늘 일정</h2>
+        <div id="calendarList" class="list"></div>
+      </div>
+      <div id="news" class="panel">
+        <h2>주요 뉴스</h2>
+        <div id="newsList" class="list"></div>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <div id="captions"></div>
+      <!--
+        Listening progress bar (was showing the remaining time after wake word).
+        Temporarily hidden per request to reduce UI clutter.
+        <div id="listenBar"><span></span></div>
+      -->
+      <div class="controls">
+        <div class="pill" id="micStatus"><span class="status-dot dot-off" id="micDot"></span><span id="micText">마이크 꺼짐</span></div>
+        <input class="pill" id="chatInput" placeholder="질문을 입력하세요... (예: 오늘 일정 어때?)" />
+        <button class="pill btn" id="sendBtn">보내기</button>
+      </div>
+    </div>
+  </div>
 
   <script>
-    async function fetchTime() {
-      try {
-        const res = await fetch('/api/time');
-        const data = await res.json();
-        document.getElementById('time').textContent = data.time;
-        document.getElementById('date').textContent = data.date;
-      } catch (err) {
-        document.getElementById('time').textContent = '시간 정보를 불러올 수 없습니다.';
-        document.getElementById('date').textContent = '날짜 정보를 불러올 수 없습니다.';
+    const $ = (id) => document.getElementById(id);
+
+    const formatTime = (date) => {
+      const h = date.getHours();
+      const m = date.getMinutes();
+      const isAM = h < 12; const hh = h % 12 === 0 ? 12 : h % 12;
+      return `오${isAM ? '전' : '후'} ${hh}:${String(m).padStart(2,'0')}`;
+    };
+    const formatDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth()+1).padStart(2,'0');
+      const day = String(date.getDate()).padStart(2,'0');
+      const weekday = ['일','월','화','수','목','금','토'][date.getDay()];
+      return `${year}년 ${month}월 ${day}일 (${weekday})`;
+    };
+
+    // Captions
+    let ephemeralEl = null;
+    const addCaption = (role, text, { ephemeral=false, autohideMs=null }={}) => {
+      if (ephemeral) {
+        if (!ephemeralEl) {
+          ephemeralEl = document.createElement('div');
+          ephemeralEl.className = `caption ${role} ephemeral`;
+          ephemeralEl.innerHTML = `<div class="role">${role === 'user' ? '나' : '미러'}</div><div class="text"></div>`;
+          $('captions').appendChild(ephemeralEl);
+        }
+        ephemeralEl.querySelector('.text').textContent = text;
+        return;
       }
-    }
-  
-    // 초기 호출 + 1분마다 갱신
-    fetchTime();
-    setInterval(fetchTime, 60000);
-    
-    async function fetchWeather() {
-      try {
-        const res = await fetch('/api/weather');
-        const data = await res.json();
-        document.getElementById('weather').innerHTML = `
-          <div>${data.name}</div>
-          <div class="temp">${data.main.temp}°C</div>
-          <div>${data.weather[0].description}</div>
-        `;
-      } catch (err) {
-        document.getElementById('weather').textContent = '날씨 정보를 불러올 수 없습니다.';
+      if (ephemeralEl) { ephemeralEl.remove(); ephemeralEl = null; }
+      const el = document.createElement('div');
+      el.className = `caption ${role}`;
+      el.innerHTML = `<div class="role">${role === 'user' ? '나' : '미러'}</div><div class="text">${text}</div>`;
+      $('captions').appendChild(el);
+      // keep last ~8 captions
+      const nodes = $('captions').querySelectorAll('.caption');
+      if (nodes.length > 8) nodes[0].remove();
+      if (autohideMs && Number.isFinite(autohideMs)) {
+        setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); }, autohideMs);
       }
+      // 클릭 시 즉시 페이드아웃
+      el.addEventListener('click', () => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); });
+    };
+
+    // Data loading
+    async function loadSummary() {
+      try {
+        const res = await fetch('/api/summary');
+        const data = await res.json();
+        $('time').textContent = data.time;
+        $('date').textContent = data.date;
+        $('advice').textContent = data.advice || '';
+        // Calendar
+        renderCalendar(data.events || []);
+      } catch (e) { console.warn('요약 로드 실패', e); }
     }
-    
-    async function fetchNews() {
+
+    async function loadNews() {
       try {
         const res = await fetch('/api/news');
         const data = await res.json();
-        const newsList = document.getElementById('news-list');
-        newsList.innerHTML = '';
-    
-        const heading = document.createElement('li');
-        heading.style.fontWeight = 'bold';
-        heading.style.marginBottom = '10px';
-        heading.textContent = '최신 주요 뉴스';
-        newsList.appendChild(heading);
-    
-        data.articles.forEach(article => {
-          const li = document.createElement('li');
-          li.style.display = 'flex';
-          li.style.justifyContent = 'space-between';
-          li.style.alignItems = 'center';
-          li.style.marginBottom = '8px';
-    
-          const title = `${article.title}`;
-          const time = formatTimeAgo(article.pubDate);
-    
-          const left = document.createElement('span');
-          left.textContent = title;
-    
-          const right = document.createElement('span');
-          right.textContent = time;
-          right.style.color = '#aaa';
-          right.style.fontSize = '0.9rem';
-    
-          li.appendChild(left);
-          li.appendChild(right);
-          newsList.appendChild(li);
-        });
-      } catch (err) {
-        document.getElementById('news-list').innerHTML = '<li>뉴스 정보를 불러올 수 없습니다.</li>';
-      }
-    }
-    
-    function formatTimeAgo(pubDate) {
-      const diffMs = new Date() - new Date(pubDate);
-      const diffMin = Math.floor(diffMs / 60000);
-      if (diffMin < 1) return '방금 전';
-      if (diffMin < 60) return `${diffMin}분 전`;
-      const hours = Math.floor(diffMin / 60);
-      return `${hours}시간 전`;
+        renderNews(data.articles || []);
+      } catch (e) { console.warn('뉴스 로드 실패', e); }
     }
 
-    function showAssistantResponse(text) {
-      const el = document.getElementById('assistant-response');
-      el.textContent = text;
-      el.style.display = 'block';
-      el.classList.remove('fadeOut');
-      void el.offsetWidth; // reflow for animation restart
-      el.classList.add('fadeInOut');
-    }
-
-    async function activateAssistant() {
-      showAssistantResponse('? 듣는 중...\n"오케이 구글" 또는 "ok google"이라고 말하세요');
+    async function loadWeather() {
       try {
-        const res = await fetch('/api/assistant');
-        const data = await res.json();
-        showAssistantResponse(`${data.response}`);
-      } catch (err) {
-        showAssistantResponse('? 오류 발생: 어시스턴트 실패');
-        console.error(err);
+        const res = await fetch('/api/weather');
+        const w = await res.json();
+        const temp = Math.round(w.main?.temp ?? 0);
+        const desc = (w.weather && w.weather[0] && w.weather[0].description) ? w.weather[0].description : '';
+        const city = w.name || '';
+        const humidity = w.main?.humidity;
+        const wind = w.wind?.speed;
+        $('temp').textContent = `${isFinite(temp) ? temp : '--'}°C`;
+        $('weatherDesc').textContent = `${city ? city + ' · ' : ''}${desc}`;
+        const meta = [];
+        if (typeof humidity === 'number') meta.push(`습도 ${humidity}%`);
+        if (typeof wind === 'number') meta.push(`바람 ${wind}m/s`);
+        $('weatherMeta').textContent = meta.join(' · ');
+      } catch (e) {
+        console.warn('날씨 로드 실패', e);
       }
     }
 
-    fetchWeather();
-    fetchNews();
-    document.getElementById('ask-button').addEventListener('click', activateAssistant);
+    function renderCalendar(events) {
+      const box = $('calendarList');
+      box.innerHTML = '';
+      if (!events.length) {
+        box.innerHTML = '<div class="item"><div class="left"><span class="title">오늘 일정이 없습니다.</span></div></div>';
+        return;
+      }
+      for (const ev of events.slice(0, 8)) {
+        const div = document.createElement('div');
+        div.className = 'item';
+        const isAllDay = ev.isAllDay || (new Date(ev.start).getHours() === 0 && new Date(ev.end).getHours() === 23);
+        const timeStr = isAllDay ? '하루종일' : formatEventTime(ev.start, ev.end);
+        div.innerHTML = `<div class="left"><span class="time">${timeStr}</span><span class="title">${escapeHtml(ev.summary || '(제목 없음)')}</span></div>` + (ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank">열기</a>` : '<span></span>');
+        box.appendChild(div);
+      }
+    }
+
+    function renderNews(articles) {
+      const box = $('newsList');
+      box.innerHTML = '';
+      if (!articles.length) {
+        box.innerHTML = '<div class="item"><div class="left"><span class="title">뉴스를 불러오지 못했습니다.</span></div></div>';
+        return;
+      }
+      for (const a of articles.slice(0, 6)) {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `<div class="left"><span class="title">${escapeHtml(a.title)}</span></div>`;
+        box.appendChild(div);
+      }
+    }
+
+    function escapeHtml(s){ return s?.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) || ''; }
+    function formatEventTime(start, end) {
+      try {
+        const s = new Date(start), e = new Date(end);
+        const sH = s.getHours(); const sM = String(s.getMinutes()).padStart(2,'0');
+        const eH = e.getHours(); const eM = String(e.getMinutes()).padStart(2,'0');
+        const sAM = sH < 12; const eAM = eH < 12;
+        const sh = sH % 12 === 0 ? 12 : sH % 12; const eh = eH % 12 === 0 ? 12 : eH % 12;
+        return `오${sAM?'전':'후'} ${sh}:${sM} ~ 오${eAM?'전':'후'} ${eh}:${eM}`;
+      } catch { return ''; }
+    }
+
+    // WS
+    function initWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}`);
+      ws.onopen = () => console.log('WS 연결됨');
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'status') {
+            if (msg.status === 'connected') return;
+            if (msg.status === 'listening_on') { setMicUI(true); }
+            if (msg.status === 'listening_off') { setMicUI(false); setListeningWindow(0, 0); if (ephemeralEl) { ephemeralEl.remove(); ephemeralEl = null; } }
+            if (msg.status === 'wakeup') { addCaption('assistant', '네, 말씀하세요.', { autohideMs: 4000 }); }
+            if (msg.status === 'processing') { setListeningWindow(0, 0); }
+            if (msg.status === 'listening_window') { setListeningWindow(msg.remainingMs, msg.totalMs); }
+            if (msg.status === 'listening_timeout') { addCaption('assistant', '다시 불러주세요.', { autohideMs: 4000 }); setListeningWindow(0,0); }
+          } else if (msg.type === 'transcript') {
+            // Show interim as ephemeral; on final, replace with single final caption and auto-hide
+            if (!msg.final) {
+              addCaption('user', msg.text, { ephemeral: true });
+            } else {
+              // remove ephemeral if exists, then add single final caption
+              if (ephemeralEl) { ephemeralEl.remove(); ephemeralEl = null; }
+              addCaption('user', msg.text, { autohideMs: 8000 });
+            }
+          } else if (msg.type === 'response') {
+            // Always show mirror's speech as subtitles too
+            addCaption('assistant', msg.text, { autohideMs: 12000 });
+          }
+        } catch (e) {}
+      };
+      ws.onclose = () => { setMicUI(false); setTimeout(initWS, 2000); };
+    }
+
+    function setMicUI(on) {
+      $('micDot').className = `status-dot ${on ? 'dot-on' : 'dot-off'}`;
+      $('micText').textContent = on ? '마이크 켜짐' : '마이크 꺼짐';
+    }
+
+    function setListeningWindow(remainingMs, totalMs) {
+      const bar = $('listenBar');
+      const fill = bar.querySelector('span');
+      if (!totalMs || !remainingMs) { bar.style.opacity = 0; fill.style.width = '0%'; return; }
+      const pct = Math.max(0, Math.min(100, Math.round(((totalMs - remainingMs) / totalMs) * 100)));
+      fill.style.width = `${pct}%`;
+      bar.style.opacity = 1;
+    }
+
+    // Chat
+    async function sendChat() {
+      const v = $('chatInput').value.trim();
+      if (!v) return;
+      addCaption('user', v);
+      $('chatInput').value = '';
+      try {
+        const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: v }) });
+        const data = await res.json();
+        // 답변 자막은 WebSocket 'response' 이벤트로만 처리해 중복 표시를 방지합니다.
+      } catch {}
+    }
+
+    // Auto update clock per second
+    setInterval(() => {
+      const now = new Date();
+      $('time').textContent = formatTime(now);
+      $('date').textContent = formatDate(now);
+    }, 1000);
+
+    // Initial load
+    loadSummary();
+    loadWeather();
+    loadNews();
+    setInterval(loadNews, 1000 * 60 * 10);
+    setInterval(loadSummary, 1000 * 60 * 5);
+    setInterval(loadWeather, 1000 * 60 * 10);
+    initWS();
+
+    $('sendBtn').addEventListener('click', sendChat);
+    $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+    // 클릭 시 모든 자막 서서히 제거
+    document.addEventListener('click', () => {
+      document.querySelectorAll('#captions .caption').forEach(el => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); });
+    });
   </script>
 </body>
 </html>
+
+
