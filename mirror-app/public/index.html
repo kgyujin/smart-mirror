@@ -36,7 +36,16 @@
     /* DateTime */
     #dateTime .time { font-size: 84px; font-weight: 700; line-height: 1; }
     #dateTime .date { font-size: 22px; color: var(--muted); margin-top: 6px; }
-    #advice { margin-top: 14px; font-size: 18px; color: var(--success); }
+    #advice { 
+      margin-top: 14px; 
+      font-size: 18px; 
+      color: var(--success); 
+      font-weight: 500;
+      min-height: 1.2em;
+      transition: opacity 0.3s ease;
+    }
+    #advice:empty { opacity: 0; }
+    #advice:not(:empty) { opacity: 1; }
 
     /* Weather */
     #weather .temp { font-size: 48px; font-weight: 700; }
@@ -88,7 +97,7 @@
       <div id="dateTime" class="panel">
         <div class="time" id="time">--:--</div>
         <div class="date" id="date">--</div>
-        <div class="advice" id="advice">조언을 준비 중...</div>
+        <div class="advice" id="advice"></div>
       </div>
       <div id="weather" class="panel">
         <h2>현재 날씨</h2>
@@ -171,6 +180,18 @@
       el.addEventListener('click', () => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); });
     };
 
+    // 개인화된 메시지 로드
+    async function loadPersonalizedMessage() {
+      try {
+        const res = await fetch('/api/personalized-message');
+        const data = await res.json();
+        $('advice').textContent = data.message || '';
+      } catch (e) { 
+        console.warn('개인화 메시지 로드 실패', e);
+        $('advice').textContent = '';
+      }
+    }
+
     // Data loading
     async function loadSummary() {
       try {
@@ -178,7 +199,7 @@
         const data = await res.json();
         $('time').textContent = data.time;
         $('date').textContent = data.date;
-        $('advice').textContent = data.advice || '';
+        // 개인화된 메시지는 별도로 로드
         // Calendar
         renderCalendar(data.events || []);
       } catch (e) { console.warn('요약 로드 실패', e); }
@@ -307,6 +328,9 @@
               const delay = Number(msg.delayMs || 3000);
               if (last) setTimeout(() => { last.style.opacity = '0'; setTimeout(() => last.remove(), 400); }, delay);
             }
+          } else if (msg.type === 'personalized_message') {
+            // 개인화된 메시지 업데이트
+            $('advice').textContent = msg.message || '';
           }
         } catch (e) {}
       };
@@ -351,9 +375,11 @@
     loadSummary();
     loadWeather();
     loadNews();
+    loadPersonalizedMessage(); // 개인화된 메시지 로드
     setInterval(loadNews, 1000 * 60 * 10);
     setInterval(loadSummary, 1000 * 60 * 5);
     setInterval(loadWeather, 1000 * 60 * 10);
+    setInterval(loadPersonalizedMessage, 1000 * 60 * 5); // 5분마다 개인화 메시지 업데이트
     initWS();
 
     $('sendBtn').addEventListener('click', sendChat);

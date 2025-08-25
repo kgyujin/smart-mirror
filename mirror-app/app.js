@@ -75,6 +75,260 @@ const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 // In-memory weather cache for outage/timeout fallback
 let weatherCache = { data: null, ts: 0 };
 
+// AI 기반 개인화 학습 시스템
+class PersonalizationSystem {
+  constructor() {
+    this.userPatterns = {
+      lastInteraction: null,
+      frequentQueries: new Map(),
+      dailyPatterns: new Map(),
+      preferences: new Map(),
+      moodHistory: []
+    };
+    this.currentMessage = '';
+    this.messageUpdateInterval = null;
+    this.startMessageUpdates();
+  }
+
+  // 사용자 상호작용 기록
+  recordInteraction(query, response, context = {}) {
+    const now = new Date();
+    const hour = now.getHours();
+    const dayOfWeek = now.getDay();
+    
+    // 마지막 상호작용 시간 기록
+    this.userPatterns.lastInteraction = now;
+    
+    // 자주 묻는 질문 패턴 분석
+    if (query) {
+      const key = query.toLowerCase().trim();
+      this.userPatterns.frequentQueries.set(key, 
+        (this.userPatterns.frequentQueries.get(key) || 0) + 1
+      );
+    }
+    
+    // 시간대별 패턴 분석
+    const timeKey = `${dayOfWeek}-${hour}`;
+    this.userPatterns.dailyPatterns.set(timeKey, 
+      (this.userPatterns.dailyPatterns.get(timeKey) || 0) + 1
+    );
+    
+    // 선호도 분석 (응답 길이, 질문 유형 등)
+    if (response) {
+      const responseLength = response.length;
+      const queryType = this.analyzeQueryType(query);
+      this.userPatterns.preferences.set('responseLength', 
+        (this.userPatterns.preferences.get('responseLength') || 0) + responseLength
+      );
+      this.userPatterns.preferences.set('queryType', queryType);
+    }
+  }
+
+  // 질문 유형 분석
+  analyzeQueryType(query) {
+    const lowerQuery = query.toLowerCase();
+    if (/(시간|몇\s*시)/.test(lowerQuery)) return 'time';
+    if (/(날씨|기온)/.test(lowerQuery)) return 'weather';
+    if (/(일정|스케줄|캘린더)/.test(lowerQuery)) return 'schedule';
+    if (/(뉴스|속보)/.test(lowerQuery)) return 'news';
+    if (/(요일|날짜)/.test(lowerQuery)) return 'date';
+    return 'general';
+  }
+
+  // 개인화된 메시지 생성
+  async generatePersonalizedMessage() {
+    const now = new Date();
+    const hour = now.getHours();
+    const dayOfWeek = now.getDay();
+    const dayOfWeekName = ['일', '월', '화', '수', '목', '금', '토'][dayOfWeek];
+    
+    try {
+      // 현재 상황 분석
+      const context = await this.analyzeCurrentContext();
+      
+      // 개인화된 메시지 생성
+      if (openai) {
+        const system = `당신은 스마트 미러의 개인화된 AI 비서입니다. 
+사용자의 패턴과 현재 상황을 바탕으로 자연스럽고 도움이 되는 한 문장 메시지를 생성하세요.
+
+규칙:
+- 20자 이내의 간결한 메시지
+- 시간대와 상황에 맞는 적절한 제안
+- 사용자 패턴을 고려한 개인화
+- 필요하지 않으면 빈 문자열 반환
+- 존댓말로 정중하게`;
+
+        const user = `현재 상황: ${JSON.stringify(context)}
+사용자 패턴: ${JSON.stringify(this.getUserPatterns())}
+현재 시간: ${hour}시, ${dayOfWeekName}요일
+
+개인화된 메시지를 생성해주세요.`;
+
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          temperature: 0.7,
+          max_tokens: 50,
+        });
+        
+        const message = completion.choices?.[0]?.message?.content?.trim() || '';
+        return message;
+      }
+    } catch (error) {
+      log.warn('개인화 메시지 생성 실패:', error.message);
+    }
+    
+    // GPT 실패 시 기본 규칙 기반 메시지
+    return this.generateRuleBasedMessage(now, hour, dayOfWeekName);
+  }
+
+  // 현재 상황 분석
+  async analyzeCurrentContext() {
+    const context = {
+      time: new Date().toLocaleTimeString('ko-KR'),
+      dayOfWeek: new Date().getDay(),
+      hour: new Date().getHours(),
+      weather: null,
+      events: [],
+      lastInteraction: this.userPatterns.lastInteraction
+    };
+
+    try {
+      // 날씨 정보 (함수가 정의된 경우에만 호출)
+      if (typeof fetchWeatherData === 'function') {
+        const weatherData = await fetchWeatherData();
+        context.weather = {
+          temp: weatherData.main?.temp,
+          description: weatherData.weather?.[0]?.description,
+          isRaining: /비|눈/.test(weatherData.weather?.[0]?.description || '')
+        };
+      }
+
+      // 오늘 일정 (함수가 정의된 경우에만 호출)
+      if (typeof fetchTodayEvents === 'function') {
+        const events = await fetchTodayEvents();
+        context.events = events.slice(0, 3).map(ev => ({
+          time: ev.start,
+          summary: ev.summary,
+          isAllDay: ev.isAllDay
+        }));
+      }
+    } catch (error) {
+      log.warn('상황 분석 실패:', error.message);
+    }
+
+    return context;
+  }
+
+  // 규칙 기반 메시지 생성
+  generateRuleBasedMessage(now, hour, dayOfWeekName) {
+    // 시간대별 기본 메시지
+    if (hour >= 6 && hour < 9) {
+      return '좋은 아침입니다! 오늘도 힘내세요';
+    } else if (hour >= 9 && hour < 12) {
+      return '오전 업무 화이팅입니다!';
+    } else if (hour >= 12 && hour < 14) {
+      return '점심 맛있게 드세요';
+    } else if (hour >= 14 && hour < 18) {
+      return '오후도 파이팅입니다!';
+    } else if (hour >= 18 && hour < 21) {
+      return '하루 수고하셨습니다';
+    } else if (hour >= 21) {
+      return '편안한 밤 되세요';
+    }
+    
+    return '';
+  }
+
+  // 사용자 패턴 요약
+  getUserPatterns() {
+    const patterns = {
+      mostFrequentQuery: '',
+      preferredTime: '',
+      averageResponseLength: 0,
+      lastInteractionHours: 0
+    };
+
+    // 가장 자주 묻는 질문
+    let maxCount = 0;
+    for (const [query, count] of this.userPatterns.frequentQueries) {
+      if (count > maxCount) {
+        maxCount = count;
+        patterns.mostFrequentQuery = query;
+      }
+    }
+
+    // 선호하는 시간대
+    let maxTimeCount = 0;
+    for (const [timeKey, count] of this.userPatterns.dailyPatterns) {
+      if (count > maxTimeCount) {
+        maxTimeCount = count;
+        patterns.preferredTime = timeKey;
+      }
+    }
+
+    // 평균 응답 길이
+    const totalLength = this.userPatterns.preferences.get('responseLength') || 0;
+    const interactionCount = this.userPatterns.frequentQueries.size;
+    patterns.averageResponseLength = interactionCount > 0 ? Math.round(totalLength / interactionCount) : 0;
+
+    // 마지막 상호작용으로부터 경과 시간
+    if (this.userPatterns.lastInteraction) {
+      const hoursSince = (Date.now() - this.userPatterns.lastInteraction.getTime()) / (1000 * 60 * 60);
+      patterns.lastInteractionHours = Math.round(hoursSince);
+    }
+
+    return patterns;
+  }
+
+  // 메시지 업데이트 시작
+  startMessageUpdates() {
+    // 5분마다 메시지 업데이트
+    this.messageUpdateInterval = setInterval(async () => {
+      const newMessage = await this.generatePersonalizedMessage();
+      if (newMessage !== this.currentMessage) {
+        this.currentMessage = newMessage;
+        // WebSocket을 통해 클라이언트에 전송
+        broadcast({ 
+          type: 'personalized_message', 
+          message: newMessage,
+          timestamp: Date.now()
+        });
+      }
+    }, 5 * 60 * 1000); // 5분
+
+    // 초기 메시지 생성을 약간 지연시켜 다른 함수들이 정의된 후 실행
+    setTimeout(async () => {
+      const message = await this.generatePersonalizedMessage();
+      this.currentMessage = message;
+      broadcast({ 
+        type: 'personalized_message', 
+        message: message,
+        timestamp: Date.now()
+      });
+    }, 1000); // 1초 지연
+  }
+
+  // 현재 메시지 가져오기
+  getCurrentMessage() {
+    return this.currentMessage;
+  }
+
+  // 시스템 정리
+  cleanup() {
+    if (this.messageUpdateInterval) {
+      clearInterval(this.messageUpdateInterval);
+      this.messageUpdateInterval = null;
+    }
+  }
+}
+
+// 개인화 시스템 인스턴스 생성
+const personalizationSystem = new PersonalizationSystem();
+
 // 안정적인 날씨 API 호출 함수
 const fetchWeatherData = async (useCache = true) => {
   // 캐시된 데이터가 있고 30분 이내라면 캐시 사용
@@ -872,7 +1126,12 @@ const answerWithGPT = async (userText, extraContext = {}) => {
       max_tokens: 200,
     });
     const raw = completion.choices?.[0]?.message?.content?.trim() || '';
-    return sanitizeAssistantText(raw) || '요청을 이해하지 못했습니다.';
+    const response = sanitizeAssistantText(raw) || '요청을 이해하지 못했습니다.';
+    
+    // 개인화 시스템에 상호작용 기록
+    personalizationSystem.recordInteraction(userText, response);
+    
+    return response;
   } catch (e) {
     log.error('GPT 대화 오류:', e.message);
     return '응답 생성에 실패했습니다.';
@@ -1210,6 +1469,9 @@ const processRecognizedCommand = async (text) => {
     log.error('명령 처리 오류:', e.message);
     reply = '요청을 처리하는 중 문제가 발생했습니다.';
   }
+  // 개인화 시스템에 상호작용 기록
+  personalizationSystem.recordInteraction(trimmed, reply);
+  
   broadcast({ type: 'response', role: 'assistant', text: reply });
   await safeTTS(reply);
   // mic 상태 복귀는 호출부에서 제어 (최종 응답 이후)
@@ -1852,6 +2114,20 @@ app.post('/api/date-parse', async (req, res) => {
   }
 });
 
+// 개인화된 메시지 API
+app.get('/api/personalized-message', (req, res) => {
+  try {
+    const message = personalizationSystem.getCurrentMessage();
+    res.json({ 
+      message: message,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    log.error('개인화 메시지 API 오류:', error);
+    res.status(500).json({ error: '개인화 메시지를 가져오지 못했습니다.' });
+  }
+});
+
 // 헬스체크 엔드포인트
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();
@@ -1900,6 +2176,7 @@ if (ALWAYS_LISTEN) {
 // 프로세스 종료 시 정리
 process.on('SIGINT', () => {
   log.info('서버 종료 중...');
+  personalizationSystem.cleanup();
   process.exit(0);
 });
 
