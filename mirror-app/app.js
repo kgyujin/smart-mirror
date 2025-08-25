@@ -12,6 +12,7 @@ const { SpeechClient } = require('@google-cloud/speech');
 const wav = require('wav');
 const { exec } = require('child_process');
 const dns = require('node:dns');
+const os = require('os');
 if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
@@ -59,14 +60,75 @@ const TOKEN_PATH = path.join(__dirname, 'tokens.json');
 const SPEECH_CREDENTIALS_PATH = path.join(__dirname, 'credentials_serviceAccount.json');
 
 const speechClient = new SpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
+// Google Cloud Text-to-Speech (자연스러운 음성)
+let textToSpeech = null;
+let ttsClient = null;
+try {
+  textToSpeech = require('@google-cloud/text-to-speech');
+  ttsClient = new textToSpeech.TextToSpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
+} catch (e) {
+  // 패키지가 없거나 초기화 실패 시 espeak 폴백 사용
+  log.warn('Google Cloud TTS 사용 불가. espeak로 폴백합니다:', e.message);
+}
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 // In-memory weather cache for outage/timeout fallback
 let weatherCache = { data: null, ts: 0 };
 
+// 안정적인 날씨 API 호출 함수
+const fetchWeatherData = async (useCache = true) => {
+  // 캐시된 데이터가 있고 30분 이내라면 캐시 사용
+  if (useCache && weatherCache.data && Date.now() - weatherCache.ts < 30 * 60 * 1000) {
+    return { ...weatherCache.data, _cached: true };
+  }
+  
+  const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
+  
+  // 최대 3번 재시도
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await axios.get(url, { 
+        timeout: 8000,
+        // DNS 설정 개선
+        family: 4, // IPv4만 사용
+        // 연결 설정
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+      
+      // 성공 시 캐시 업데이트
+      weatherCache = { data: response.data, ts: Date.now() };
+      return response.data;
+    } catch (error) {
+      log.warn(`날씨 API 호출 실패 (시도 ${attempt}/3):`, error.message);
+      
+      // 마지막 시도가 아니면 잠시 대기 후 재시도
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        continue;
+      }
+    }
+  }
+  
+  // 모든 시도 실패 시 캐시된 데이터 확인
+  if (weatherCache.data && Date.now() - weatherCache.ts < 6 * 60 * 60 * 1000) {
+    log.info('캐시된 날씨 데이터 사용');
+    return { ...weatherCache.data, _stale: true };
+  }
+  
+  // 기본 날씨 정보 제공
+  log.warn('날씨 API 완전 실패, 기본 정보 제공');
+  return {
+    name: '서울',
+    main: { temp: 20 },
+    weather: [{ description: '날씨 정보를 불러올 수 없습니다' }],
+    _error: true
+  };
+};
+
 // Wakeword utilities
-const WAKEWORD_TEST = /(미러야|밀어야|hi\s*mirror|하이\s*미러|하이미러)/i; // for .test
-const WAKEWORD_REMOVE = /(미러야|밀어야|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
+const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/i; // for .test
+const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
 
 // Short beep on wake
 const safeBeep = () => {
@@ -104,21 +166,127 @@ const broadcast = (messageObj) => {
   }
 };
 
+// 설정: TTS 자막 숨김 지연
+const CAPTION_HIDE_AFTER_TTS_MS = Number(process.env.CAPTION_HIDE_AFTER_TTS_MS || 3000);
+
+// TTS 제어
+let currentTTSProcess = null;
+const stopTTS = () => {
+  try {
+    if (currentTTSProcess) {
+      log.tts('중단 요청');
+      if (process.platform === 'win32') {
+        try { process.kill(currentTTSProcess.pid); } catch {}
+        exec(`taskkill /PID ${currentTTSProcess.pid} /T /F`);
+      } else {
+        try { currentTTSProcess.kill('SIGKILL'); } catch {}
+      }
+    }
+  } catch (e) {
+    log.error('TTS 중단 오류:', e);
+  } finally {
+    currentTTSProcess = null;
+  }
+};
+
 // 안전한 TTS 함수
-const safeTTS = (text) => {
+const safeTTS = async (text) => {
   if (!text || text.trim() === '') return;
+  stopTTS();
   log.tts('시작:', text);
+  isTTSActive = true;
+  broadcast({ type: 'tts', status: 'start', text });
+  
+  // Google Cloud TTS 우선 사용
+  if (ttsClient) {
+    try {
+      const request = {
+        input: { text },
+        voice: { languageCode: 'ko-KR', name: process.env.TTS_VOICE || 'ko-KR-Wavenet-A' },
+        audioConfig: {
+          audioEncoding: 'LINEAR16',
+          speakingRate: Number(process.env.TTS_RATE || 1.0),
+          pitch: Number(process.env.TTS_PITCH || 0.0),
+          volumeGainDb: Number(process.env.TTS_GAIN_DB || 0.0),
+          sampleRateHertz: Number(process.env.TTS_SAMPLE_RATE || 22050)
+        }
+      };
+      const [response] = await ttsClient.synthesizeSpeech(request);
+      const sampleRate = Number(process.env.TTS_SAMPLE_RATE || 22050);
+      const wavPath = path.join(os.tmpdir(), `mirror_tts_${Date.now()}.wav`);
+      // LINEAR16은 RAW PCM이므로 WAV 컨테이너로 래핑
+      try {
+        const writer = new wav.FileWriter(wavPath, { channels: 1, sampleRate, bitDepth: 16 });
+        writer.write(Buffer.from(response.audioContent));
+        writer.end();
+      } catch (wrapErr) {
+        log.warn('WAV 래핑 실패, RAW로 재생 시도:', wrapErr.message);
+        fs.writeFileSync(wavPath, Buffer.from(response.audioContent));
+      }
+      // 플랫폼별 재생 방법 선택
+      let playCmd = '';
+      if (process.platform === 'win32') {
+        // PowerShell SoundPlayer 동기 재생
+        const psPath = wavPath.replace(/\\/g, '/');
+        playCmd = `powershell -NoProfile -Command $p=New-Object System.Media.SoundPlayer; $p.SoundLocation='${psPath}'; $p.Load(); $p.PlaySync()`;
+      } else {
+        playCmd = `play -q "${wavPath}"`;
+      }
+      currentTTSProcess = exec(playCmd, (error) => {
+        if (error) {
+          log.warn('기본 재생 실패, aplay로 재시도:', error.message);
+          try {
+            if (process.platform !== 'win32') {
+              currentTTSProcess = exec(`aplay -q "${wavPath}"`, (aplayErr) => {
+                if (aplayErr) {
+                  log.error('aplay 재생 실패:', aplayErr.message);
+                }
+                try { fs.unlinkSync(wavPath); } catch {}
+                isTTSActive = false;
+                broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+              });
+              if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
+                currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
+                currentTTSProcess.on('close', () => { currentTTSProcess = null; });
+              }
+              return;
+            }
+          } catch {}
+        }
+        try { fs.unlinkSync(wavPath); } catch {}
+        isTTSActive = false;
+        broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+      });
+      if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
+        currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
+        currentTTSProcess.on('close', () => { currentTTSProcess = null; });
+      }
+      return;
+    } catch (e) {
+      log.warn('Google Cloud TTS 실패, espeak로 폴백:', e.message);
+    }
+  }
+
+  // 폴백: espeak
   try {
     const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -s 150 -v ko`;
-    exec(command, (error) => {
+    currentTTSProcess = exec(command, (error) => {
       if (error) {
         log.error('TTS 오류:', error.message);
       } else {
         log.tts('완료:', text);
       }
+      isTTSActive = false;
+      broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
     });
+    if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
+      currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
+      currentTTSProcess.on('close', () => { currentTTSProcess = null; });
+    }
   } catch (error) {
     log.error('TTS 실행 오류:', error);
+    isTTSActive = false;
+    broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
   }
 };
 
@@ -410,11 +578,11 @@ const buildDayContext = async () => {
   // 날씨
   let weatherText = '날씨 정보를 불러오지 못했습니다.';
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
-    const response = await axios.get(url);
-    const data = response.data;
-    weatherText = `현재 ${data.name} ${Math.round(data.main.temp)}°C, ${data.weather?.[0]?.description || ''}`;
-  } catch {}
+    const weatherData = await fetchWeatherData();
+    weatherText = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}°C, ${weatherData.weather?.[0]?.description || ''}`;
+  } catch (error) {
+    log.warn('날씨 정보 로딩 실패:', error.message);
+  }
 
   // 캘린더
   let events = [];
@@ -501,25 +669,63 @@ const sanitizeAssistantText = (text) => {
 const answerWithGPT = async (userText, extraContext = {}) => {
   try {
     const text = (userText || '').toLowerCase();
-    // 주제별로 실시간 외부 API 기반의 결정적 응답 우선
-    if (/날씨|기온|비|눈|온도|우산/.test(text)) {
+    
+    // 우선순위 기반 처리
+    // 1. 뉴스 관련 질문
+    if (/뉴스/.test(text)) {
       try {
-        const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
-        const response = await axios.get(url, { timeout: 6000 });
-        const d = response.data;
-        const reply = `현재 ${d.name} ${Math.round(d.main.temp)}도, ${d.weather?.[0]?.description || ''}입니다.`;
-        return reply.trim();
+        const newsRes = await axios.post(`http://localhost:${PORT}/api/news`, { query: userText });
+        if (newsRes.data?.response) {
+          return newsRes.data.response;
+        } else {
+          const latest = await axios.get(`http://localhost:${PORT}/api/news`);
+          const items = latest.data.articles?.slice(0, 3) || [];
+          return items.length ? `오늘의 주요 뉴스입니다. ${items.map((it, i) => `(${i + 1}) ${it.title}`).join(' ')}` : '뉴스 정보를 불러올 수 없습니다.';
+        }
       } catch {
-        // fallback to cached weather if available via route
         try {
-          const w = await axios.get(`http://localhost:${PORT}/api/weather`, { timeout: 4000 });
-          const d = w.data;
-          return `현재 ${d.name} ${Math.round(d.main?.temp ?? 0)}도, ${d.weather?.[0]?.description || ''}입니다.`;
+          const latest = await axios.get(`http://localhost:${PORT}/api/news`);
+          const items = latest.data.articles?.slice(0, 3) || [];
+          return items.length ? `오늘의 주요 뉴스입니다. ${items.map((it, i) => `(${i + 1}) ${it.title}`).join(' ')}` : '뉴스 정보를 불러올 수 없습니다.';
         } catch {
-          return '날씨 정보를 불러오지 못했습니다.';
+          return '뉴스 정보를 가져오는 데 실패했습니다.';
         }
       }
     }
+    
+    // 2. 날씨 관련 질문
+    if (/날씨|기온|비|눈|온도|우산/.test(text)) {
+      try {
+        const weatherData = await fetchWeatherData();
+        return `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
+      } catch {
+        return '날씨 정보를 불러오지 못했습니다.';
+      }
+    }
+    
+    // 3. 순수한 날짜/시간 관련 질문
+    const dateInfo = parseRelativeDate(userText);
+    if (dateInfo.type !== 'unknown' && isPureDateQuery(userText)) {
+      return await generateDateResponse(dateInfo, userText);
+    }
+    
+    // 기존 상대 시간 처리 (하위 호환성) - 새로운 날짜 인지 시스템으로 대체됨
+    /*
+    const relativeHourMatch = text.match(/(\d{1,2})\s*시간\s*(뒤|후)/);
+    const relativeMinuteMatch = text.match(/(\d{1,2})\s*분\s*(뒤|후)/);
+    if (relativeHourMatch || relativeMinuteMatch) {
+      const now = getKSTNow();
+      let deltaMs = 0;
+      if (relativeHourMatch) deltaMs += parseInt(relativeHourMatch[1], 10) * 60 * 60 * 1000;
+      if (relativeMinuteMatch) deltaMs += parseInt(relativeMinuteMatch[1], 10) * 60 * 1000;
+      const target = new Date(now.getTime() + deltaMs);
+      const isAM = target.getHours() < 12;
+      const hh = target.getHours() % 12 === 0 ? 12 : target.getHours() % 12;
+      const mm = String(target.getMinutes()).padStart(2, '0');
+      return `지금으로부터 ${relativeHourMatch ? `${relativeHourMatch[1]}시간` : ''}${relativeMinuteMatch ? `${relativeMinuteMatch[1]}분` : ''} 후는 오${isAM ? '전' : '후'} ${hh}:${mm} 입니다.`.replace(/\s+/g,' ').trim();
+    }
+    */
+    // 주제별로 실시간 외부 API 기반의 결정적 응답 우선 (GPT 정제 포함)
     if (/뉴스|속보|헤드라인/.test(text)) {
       try {
         const news = await axios.get(`http://localhost:${PORT}/api/news`, { timeout: 6000 });
@@ -576,13 +782,17 @@ const answerWithGPT = async (userText, extraContext = {}) => {
       const composed = await composeWithOpenAI(facts, '기준 날짜와 요일을 한국어 한 문장으로 말하세요.');
       return composed || `${dateStr} ${weekday}입니다.`;
     }
-    // 내일/모레 날짜·요일 규칙 처리 (음성/채팅 공통)
+        // 내일/모레 날짜·요일 규칙 처리 (음성/채팅 공통) - 새로운 날짜 인지 시스템으로 대체됨
+    /*
     if (/(내일|모레)/.test(text) && /(날짜|며칠|요일)/.test(text)) {
       const offset = /모레/.test(text) ? 2 : 1;
       const { date, weekday } = getRelativeKSTDate(offset);
-      const ans = /요일/.test(text) ? `${date} ${weekday}입니다.` : `${date}입니다.`;
-      return ans;
+      if (/요일/.test(text)) return `${/모레/.test(text) ? '모레' : '내일'}은 ${weekday}입니다.`;
+      return `${/모레/.test(text) ? '모레' : '내일'}은 ${date}입니다.`;
     }
+    */
+    // 기존 일정 처리 로직 - 새로운 날짜 인지 시스템으로 대체됨
+    /*
     if (/\b(오늘|금일)\b.*(일정|캘린더|스케줄|행사|약속)/.test(text) || /(오늘\s*일정\s*요약|브리핑)/.test(text)) {
       try {
         const events = await fetchEventsForDay(getKSTNow());
@@ -644,6 +854,7 @@ const answerWithGPT = async (userText, extraContext = {}) => {
         return '일정을 가져오지 못했습니다.';
       }
     }
+    */
 
     // 일반 대화는 GPT 사용하되, 컨텍스트에는 실시간 날씨/일정 포함
     if (!openai) return 'GPT API 키가 설정되지 않았습니다.';
@@ -678,6 +889,8 @@ let commandBuffer = '';
 let listeningWindowInterval = null;
 const COMMAND_SILENCE_TIMEOUT_MS = 12000; // 호출어 후 말할 수 있는 무음 허용 시간
 const LISTENING_BROADCAST_INTERVAL_MS = 1000;
+// 현재 TTS 진행 여부 (TTS 중에는 호출어를 무시)
+let isTTSActive = false;
 
 const stopListeningWindowTicker = (notifyOff = true) => {
   if (listeningWindowInterval) {
@@ -749,6 +962,34 @@ const getEndOfKSTDay = (dateLike) => {
   return d;
 };
 
+// Week helpers
+const getKSTStartOfDay = (dateLike) => {
+  const d = new Date(new Date(dateLike).toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+const getKSTWeekRangeNextWeek = () => {
+  const now = getKSTNow();
+  const day = now.getDay(); // 0=Sun ... 6=Sat
+  // Compute next Monday
+  const diffToMonday = ((8 - ((day + 6) % 7 + 1)) % 7) + 1; // days until next Monday
+  const monday = getKSTStartOfDay(new Date(now.getTime() + diffToMonday * 24 * 60 * 60 * 1000));
+  const sunday = new Date(monday.getTime());
+  sunday.setDate(sunday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  return { start: monday, end: sunday };
+};
+const getKSTWeekRangeThisWeek = () => {
+  const now = getKSTNow();
+  const day = now.getDay();
+  const monday = getKSTStartOfDay(new Date(now.getTime() - (((day + 6) % 7)) * 24 * 60 * 60 * 1000));
+  const sunday = new Date(monday.getTime());
+  sunday.setDate(sunday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  return { start: monday, end: sunday };
+};
+const getWeekdayShortKorean = (dateLike) => ['일','월','화','수','목','금','토'][new Date(dateLike).getDay()];
+
 const startContinuousHotwordListener = () => {
   if (isMicListening) return;
   isMicListening = true;
@@ -803,6 +1044,10 @@ const startContinuousHotwordListener = () => {
         }
 
         if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcript)) {
+          // TTS 중에는 호출어를 무시하고, TTS 종료 후 바로 다음 호출에서 반응
+          if (isTTSActive) {
+            return;
+          }
           hotwordMode = 'command';
           commandBuffer = '';
           broadcast({ type: 'status', status: 'listening_on' });
@@ -862,8 +1107,11 @@ const processRecognizedCommand = async (text) => {
   const trimmed = (text || '').trim();
   if (!trimmed) return;
   log.info('명령 처리:', trimmed);
+  // 더 이상 에폭 기반 중단을 사용하지 않음
   let reply = '';
   try {
+    // 우선순위 기반 명령 처리
+    // 1. 뉴스 관련 질문 (가장 구체적)
     if (/뉴스/.test(trimmed)) {
       try {
         // 우선 카테고리 추론용 POST 시도
@@ -886,33 +1134,66 @@ const processRecognizedCommand = async (text) => {
           reply = '뉴스 정보를 가져오는 데 실패했습니다.';
         }
       }
-    } else if (/날씨/.test(trimmed)) {
+      broadcast({ type: 'response', role: 'assistant', text: reply });
+      await safeTTS(reply);
+      return reply;
+    }
+    
+    // 2. 날씨 관련 질문
+    if (/날씨/.test(trimmed)) {
       try {
-        const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
-        const response = await axios.get(url);
-        const d = response.data;
-        reply = `현재 ${d.name} ${Math.round(d.main.temp)}도, ${d.weather?.[0]?.description || ''}입니다.`;
+        const weatherData = await fetchWeatherData();
+        reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
       } catch {
         reply = '날씨 정보를 불러오지 못했습니다.';
       }
-    } else if (/(일정|캘린더|스케줄)/.test(trimmed) || /(다음\s*일정|next\s*event)/i.test(trimmed)) {
+      broadcast({ type: 'response', role: 'assistant', text: reply });
+      await safeTTS(reply);
+      return reply;
+    }
+    
+    // 3. 날짜/시간 관련 질문 (순수한 날짜/시간 질문만)
+    const dateInfo = parseRelativeDate(trimmed);
+    if (dateInfo.type !== 'unknown' && isPureDateQuery(trimmed)) {
+      reply = await generateDateResponse(dateInfo, trimmed);
+      broadcast({ type: 'response', role: 'assistant', text: reply });
+      await safeTTS(reply);
+      return reply;
+    }
+    
+    // 기존 상대 시간 처리 (하위 호환성) - 새로운 날짜 인지 시스템으로 대체됨
+    /*
+    const lower = trimmed.toLowerCase();
+    const relativeHourMatch = lower.match(/(\d{1,2})\s*시간\s*(뒤|후)/);
+    const relativeMinuteMatch = lower.match(/(\d{1,2})\s*분\s*(뒤|후)/);
+    if (relativeHourMatch || relativeMinuteMatch) {
+      reply = await answerWithGPT(trimmed);
+      broadcast({ type: 'response', role: 'assistant', text: reply });
+      await safeTTS(reply);
+      return reply;
+    }
+    */
+    if (/뉴스/.test(trimmed)) {
       try {
-        const events = await fetchTodayEvents();
-        if (!events.length) {
-          reply = '오늘 일정은 없습니다.';
+        // 우선 카테고리 추론용 POST 시도
+        const newsRes = await axios.post(`http://localhost:${PORT}/api/news`, { query: trimmed });
+        if (newsRes.data?.response) {
+          reply = newsRes.data.response;
         } else {
-          const nextInfo = getNextUpcomingEvent(events) || { type: 'upcoming', event: events[0] };
-          const ev = nextInfo.event;
-          const timeText = ev.isAllDay ? '하루종일' : `${formatKSTTimeFromISO(ev.start)}`;
-          reply = nextInfo.type === 'ongoing'
-            ? `지금 진행 중인 일정은 ${ev.summary} 입니다.`
-            : `다음 일정은 ${timeText} ${ev.summary} 입니다.`;
-          // GPT 조언 추가
-          const advice = getRuleBasedAdviceForDay(events);
-          if (advice) reply += ` ${advice}`;
+          // 없으면 최신 뉴스 GET으로 대체
+          const latest = await axios.get(`http://localhost:${PORT}/api/news`);
+          const items = latest.data.articles?.slice(0, 3) || [];
+          reply = items.length ? `오늘의 주요 뉴스입니다. ${items.map((it, i) => `(${i + 1}) ${it.title}`).join(' ')}` : '뉴스 정보를 불러올 수 없습니다.';
         }
-      } catch (e) {
-        reply = '일정을 가져오지 못했습니다.';
+      } catch {
+        // 최종 폴백: GET으로 재시도
+        try {
+          const latest = await axios.get(`http://localhost:${PORT}/api/news`);
+          const items = latest.data.articles?.slice(0, 3) || [];
+          reply = items.length ? `오늘의 주요 뉴스입니다. ${items.map((it, i) => `(${i + 1}) ${it.title}`).join(' ')}` : '뉴스 정보를 불러올 수 없습니다.';
+        } catch {
+          reply = '뉴스 정보를 가져오는 데 실패했습니다.';
+        }
       }
     } else if (/(몇\s*시|현재\s*시간|지금\s*시간|time)/i.test(trimmed)) {
       reply = `현재 시각은 ${formatKSTTime()}입니다.`;
@@ -930,7 +1211,7 @@ const processRecognizedCommand = async (text) => {
     reply = '요청을 처리하는 중 문제가 발생했습니다.';
   }
   broadcast({ type: 'response', role: 'assistant', text: reply });
-  safeTTS(reply);
+  await safeTTS(reply);
   // mic 상태 복귀는 호출부에서 제어 (최종 응답 이후)
   return reply;
 };
@@ -1182,17 +1463,10 @@ const checkTokenExists = () => {
 
 app.get('/api/weather', async (req, res) => {
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
-    const response = await axios.get(url, { timeout: 6000 });
-    // 캐시 저장
-    weatherCache = { data: response.data, ts: Date.now() };
-    res.json(response.data);
+    const weatherData = await fetchWeatherData(false); // 캐시 무시하고 새로 가져오기
+    res.json(weatherData);
   } catch (err) {
     log.error('날씨 API 오류:', err);
-    if (weatherCache.data && Date.now() - weatherCache.ts < 6 * 60 * 60 * 1000) {
-      // 6시간 내 마지막 성공값을 제공 (stale 표시)
-      return res.json({ ...weatherCache.data, _stale: true });
-    }
     res.status(500).json({ error: '날씨 정보를 가져오는 데 실패했습니다.' });
   }
 });
@@ -1556,6 +1830,28 @@ app.post('/api/mic/toggle', (req, res) => {
   }
 });
 
+// 날짜 인지 테스트 엔드포인트
+app.post('/api/date-parse', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: 'text 파라미터가 필요합니다.' });
+    }
+    
+    const dateInfo = parseRelativeDate(text);
+    const response = await generateDateResponse(dateInfo, text);
+    
+    res.json({
+      original: text,
+      parsed: dateInfo,
+      response: response
+    });
+  } catch (error) {
+    log.error('날짜 파싱 오류:', error);
+    res.status(500).json({ error: '날짜 파싱 실패' });
+  }
+});
+
 // 헬스체크 엔드포인트
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();
@@ -1614,3 +1910,416 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason, promise) => {
   log.error('처리되지 않은 Promise 거부 (계속 실행):', reason);
 });
+
+// ========== 날짜 인지 및 처리 유틸리티 ==========
+const parseRelativeDate = (text) => {
+  const lowerText = text.toLowerCase().trim();
+  
+  // 상대적 날짜 패턴 매칭
+  const patterns = {
+    // 오늘
+    today: /(오늘|금일|오늘날)/,
+    
+    // 내일/모레
+    tomorrow: /(내일|다음날)/,
+    dayAfterTomorrow: /(모레|글피)/,
+    
+    // 요일 기반
+    nextMonday: /(다음\s*월요일|월요일)/,
+    nextTuesday: /(다음\s*화요일|화요일)/,
+    nextWednesday: /(다음\s*수요일|수요일)/,
+    nextThursday: /(다음\s*목요일|목요일)/,
+    nextFriday: /(다음\s*금요일|금요일)/,
+    nextSaturday: /(다음\s*토요일|토요일)/,
+    nextSunday: /(다음\s*일요일|일요일)/,
+    
+    // 주 단위
+    nextWeek: /(다음\s*주|다음주)/,
+    thisWeek: /(이번\s*주|이번주|금주)/,
+    
+    // 월 단위
+    nextMonth: /(다음\s*달|다음달|내달)/,
+    thisMonth: /(이번\s*달|이번달|금월)/,
+    
+    // 시간 단위
+    hoursLater: /(\d{1,2})\s*시간\s*(뒤|후|후에)/,
+    minutesLater: /(\d{1,2})\s*분\s*(뒤|후|후에)/,
+    
+    // 특정 날짜
+    specificDate: /(\d{1,2})월\s*(\d{1,2})일/,
+    specificDay: /(\d{1,2})일/
+  };
+  
+  const now = getKSTNow();
+  const result = {
+    type: 'unknown',
+    date: null,
+    text: text,
+    original: text
+  };
+  
+  // 오늘
+  if (patterns.today.test(lowerText)) {
+    result.type = 'today';
+    result.date = new Date(now);
+    return result;
+  }
+  
+  // 내일
+  if (patterns.tomorrow.test(lowerText)) {
+    result.type = 'tomorrow';
+    result.date = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    return result;
+  }
+  
+  // 모레
+  if (patterns.dayAfterTomorrow.test(lowerText)) {
+    result.type = 'dayAfterTomorrow';
+    result.date = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    return result;
+  }
+  
+  // 시간 단위
+  const hoursMatch = lowerText.match(patterns.hoursLater);
+  const minutesMatch = lowerText.match(patterns.minutesLater);
+  
+  if (hoursMatch || minutesMatch) {
+    let totalMs = 0;
+    let timeDescription = '';
+    
+    if (hoursMatch) {
+      const hours = parseInt(hoursMatch[1], 10);
+      totalMs += hours * 60 * 60 * 1000;
+      timeDescription += `${hours}시간`;
+    }
+    
+    if (minutesMatch) {
+      const minutes = parseInt(minutesMatch[1], 10);
+      totalMs += minutes * 60 * 1000;
+      timeDescription += `${minutes}분`;
+    }
+    
+    result.type = 'timeLater';
+    result.date = new Date(now.getTime() + totalMs);
+    result.timeDescription = timeDescription;
+    return result;
+  }
+  
+  // 요일 기반
+  const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const weekdayPatterns = [
+    patterns.nextSunday, patterns.nextMonday, patterns.nextTuesday, 
+    patterns.nextWednesday, patterns.nextThursday, patterns.nextFriday, patterns.nextSaturday
+  ];
+  
+  for (let i = 0; i < weekdayPatterns.length; i++) {
+    if (weekdayPatterns[i].test(lowerText)) {
+      const targetDay = i;
+      const currentDay = now.getDay();
+      let daysToAdd = targetDay - currentDay;
+      
+      // 다음 주로 설정
+      if (daysToAdd <= 0) {
+        daysToAdd += 7;
+      }
+      
+      result.type = 'nextWeekday';
+      result.date = new Date(now.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+      result.weekday = weekdays[i];
+      return result;
+    }
+  }
+  
+  // 주 단위
+  if (patterns.nextWeek.test(lowerText)) {
+    result.type = 'nextWeek';
+    const nextMonday = new Date(now.getTime());
+    const daysUntilMonday = (8 - now.getDay()) % 7;
+    nextMonday.setDate(now.getDate() + daysUntilMonday);
+    nextMonday.setHours(0, 0, 0, 0);
+    result.date = nextMonday;
+    return result;
+  }
+  
+  if (patterns.thisWeek.test(lowerText)) {
+    result.type = 'thisWeek';
+    const thisMonday = new Date(now.getTime());
+    const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    thisMonday.setDate(now.getDate() - daysSinceMonday);
+    thisMonday.setHours(0, 0, 0, 0);
+    result.date = thisMonday;
+    return result;
+  }
+  
+  // 특정 날짜 (이번 달)
+  const specificDateMatch = lowerText.match(patterns.specificDate);
+  if (specificDateMatch) {
+    const month = parseInt(specificDateMatch[1], 10) - 1; // 0-based
+    const day = parseInt(specificDateMatch[2], 10);
+    const targetDate = new Date(now.getFullYear(), month, day);
+    
+    // 과거 날짜면 다음 해로 설정
+    if (targetDate < now) {
+      targetDate.setFullYear(targetDate.getFullYear() + 1);
+    }
+    
+    result.type = 'specificDate';
+    result.date = targetDate;
+    return result;
+  }
+  
+  // 특정 일 (이번 달)
+  const specificDayMatch = lowerText.match(patterns.specificDay);
+  if (specificDayMatch) {
+    const day = parseInt(specificDayMatch[1], 10);
+    const targetDate = new Date(now.getFullYear(), now.getMonth(), day);
+    
+    // 과거 날짜면 다음 달로 설정
+    if (targetDate < now) {
+      targetDate.setMonth(targetDate.getMonth() + 1);
+    }
+    
+    result.type = 'specificDay';
+    result.date = targetDate;
+    return result;
+  }
+  
+  return result;
+};
+
+// 날짜 포맷팅 함수 개선
+const formatRelativeDate = (dateInfo) => {
+  if (!dateInfo || !dateInfo.date) return '';
+  
+  // 특별한 시간 타입 처리
+  if (dateInfo.type === 'timeLater' && dateInfo.timeDescription) {
+    return dateInfo.timeDescription + ' 후';
+  }
+  
+  const date = dateInfo.date;
+  const now = getKSTNow();
+  
+  // 시간 차이 계산
+  const diffMs = date.getTime() - now.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  
+  // 상대적 표현
+  if (diffDays === 0) {
+    if (diffHours === 0) {
+      return diffMinutes > 0 ? `${diffMinutes}분 후` : '지금';
+    }
+    return `${diffHours}시간 후`;
+  } else if (diffDays === 1) {
+    return '내일';
+  } else if (diffDays === 2) {
+    return '모레';
+  } else if (diffDays < 7) {
+    return `${diffDays}일 후`;
+  } else if (diffDays < 30) {
+    const weeks = Math.floor(diffDays / 7);
+    return `${weeks}주 후`;
+  } else {
+    const months = Math.floor(diffDays / 30);
+    return `${months}개월 후`;
+  }
+};
+
+// 날짜 정보를 한국어로 표현
+const getKoreanDateInfo = (dateInfo) => {
+  if (!dateInfo || !dateInfo.date) return '';
+  
+  const date = dateInfo.date;
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][date.getDay()];
+  
+  const now = getKSTNow();
+  const isToday = date.toDateString() === now.toDateString();
+  const isTomorrow = date.toDateString() === new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString();
+  
+  if (isToday) {
+    return `오늘 (${weekday})`;
+  } else if (isTomorrow) {
+    return `내일 (${weekday})`;
+  } else {
+    return `${year}년 ${month}월 ${day}일 (${weekday})`;
+  }
+};
+
+// 일정 조회 함수 개선
+const getEventsForDate = async (dateInfo) => {
+  if (!dateInfo || !dateInfo.date) {
+    return [];
+  }
+  
+  try {
+    const events = await fetchEventsForDay(dateInfo.date);
+    return events;
+  } catch (error) {
+    log.error('일정 조회 오류:', error);
+    return [];
+  }
+};
+
+// 순수한 날짜/시간 질문인지 판별
+const isPureDateQuery = (query) => {
+  const lowerQuery = query.toLowerCase();
+  
+  // 다른 주제와 혼재된 질문 제외
+  const excludeKeywords = [
+    '뉴스', '날씨', '음악', '노래', '영화', '드라마', '게임', '쇼핑', '맛집', '레스토랑',
+    '운동', '헬스', '요리', '레시피', '여행', '호텔', '항공', '버스', '지하철', '택시',
+    '은행', '주식', '투자', '쇼핑몰', '마트', '편의점', '병원', '약국', '학교', '학원'
+  ];
+  
+  // 제외 키워드가 포함된 경우 순수한 날짜 질문이 아님
+  if (excludeKeywords.some(keyword => lowerQuery.includes(keyword))) {
+    return false;
+  }
+  
+  // 날짜/시간 관련 키워드가 명확히 포함된 경우만
+  const dateKeywords = [
+    '일정', '스케줄', '캘린더', '약속', '행사', '시간', '몇 시', '날짜', '며칠', '요일',
+    '내일', '모레', '오늘', '다음 주', '이번 주', '시간 후', '분 후'
+  ];
+  
+  return dateKeywords.some(keyword => lowerQuery.includes(keyword));
+};
+
+// 날짜 관련 응답 생성 (GPT 정제 포함)
+const generateDateResponse = async (dateInfo, query) => {
+  const lowerQuery = query.toLowerCase();
+  
+  // 기본 데이터 수집
+  let responseData = {
+    dateInfo: getKoreanDateInfo(dateInfo),
+    relativeText: formatRelativeDate(dateInfo),
+    events: [],
+    timeInfo: null,
+    query: query
+  };
+  
+  // 일정 정보 수집 (요일 질문이 아닌 경우에만)
+  if (/(일정|스케줄|캘린더|약속|행사)/.test(lowerQuery) || 
+      (/(알려\s*줘)/.test(lowerQuery) && !/(요일|무슨\s*요일)/.test(lowerQuery))) {
+    const events = await getEventsForDate(dateInfo);
+    
+    // 시간 관련 질문인 경우 해당 시간 이후의 일정만 필터링
+    let filteredEvents = events;
+    if (dateInfo.type === 'timeLater') {
+      const targetTime = dateInfo.date;
+      filteredEvents = events.filter(ev => {
+        const eventTime = new Date(ev.start);
+        return eventTime >= targetTime;
+      });
+    }
+    
+    responseData.events = filteredEvents.slice(0, 6).map((ev, i) => ({
+      index: i + 1,
+      time: ev.isAllDay ? '하루종일' : formatKSTTimeFromISO(ev.start),
+      summary: ev.summary
+    }));
+  }
+  
+  // 시간 정보 수집
+  if (/(몇\s*시|시간|time)/.test(lowerQuery)) {
+    const targetTime = dateInfo.date;
+    const hours = targetTime.getHours();
+    const minutes = targetTime.getMinutes();
+    const isAM = hours < 12;
+    const hourDisplay = hours % 12 === 0 ? 12 : hours % 12;
+    responseData.timeInfo = `오${isAM ? '전' : '후'} ${hourDisplay}:${minutes.toString().padStart(2, '0')}`;
+  }
+  
+  // GPT를 통한 응답 정제
+  if (openai) {
+    try {
+      const system = `당신은 한국어 스마트 미러 비서입니다. 다음 데이터를 바탕으로 사용자의 질문에 자연스럽고 정확하게 답변하세요. 
+      
+답변 규칙:
+- 요일 질문인 경우: 요일 정보만 답변 (예: "오늘은 월요일입니다", "내일은 화요일입니다")
+- 시간 질문인 경우: 시간 정보만 답변 (예: "오늘 오후 3시입니다")
+- 일정 질문인 경우: 
+  * 일정이 없으면 "일정은 없습니다"라고 답변
+  * 일정이 있으면 번호와 함께 간결하게 나열
+- 자연스러운 한국어로 답변
+- 불필요한 반복이나 중복 제거`;
+
+      // 질문 유형 판별
+      let questionType = 'general';
+      if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
+        questionType = 'weekday';
+      } else if (/(몇\s*시|시간|time)/.test(lowerQuery)) {
+        questionType = 'time';
+      } else if (/(일정|스케줄|캘린더|약속|행사)/.test(lowerQuery)) {
+        questionType = 'schedule';
+      }
+
+      const user = `사용자 질문: ${query}
+질문 유형: ${questionType}
+날짜 정보: ${responseData.dateInfo}
+상대적 표현: ${responseData.relativeText}
+${responseData.timeInfo ? `시간 정보: ${responseData.timeInfo}` : ''}
+${responseData.events.length > 0 ? `일정 목록:\n${responseData.events.map(ev => `${ev.index}. ${ev.time} ${ev.summary}`).join('\n')}` : '일정: 없음'}`;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        temperature: 0.2,
+        max_tokens: 200,
+      });
+      
+      const refinedResponse = completion.choices?.[0]?.message?.content?.trim();
+      if (refinedResponse) {
+        return refinedResponse;
+      }
+    } catch (error) {
+      log.warn('GPT 정제 실패, 기본 응답 사용:', error.message);
+    }
+  }
+  
+  // GPT 실패 시 기본 응답 생성 (우선순위 기반)
+  // 1. 요일 정보 요청 (최우선)
+  if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
+    const weekday = responseData.dateInfo.match(/\(([^)]+)\)/)?.[1] || '';
+    if (weekday) {
+      return `${weekday}입니다.`;
+    }
+    return responseData.dateInfo;
+  }
+  
+  // 2. 시간 정보 요청
+  if (/(몇\s*시|시간|time)/.test(lowerQuery)) {
+    return `${responseData.dateInfo} ${responseData.timeInfo}입니다.`;
+  }
+  
+  // 3. 일정 정보 요청
+  if (/(일정|스케줄|캘린더|약속|행사)/.test(lowerQuery) || 
+      (/(알려\s*줘)/.test(lowerQuery) && !/(요일|무슨\s*요일)/.test(lowerQuery))) {
+    if (responseData.events.length === 0) {
+      return `${responseData.dateInfo} 일정은 없습니다.`;
+    }
+    
+    const eventList = responseData.events.map(ev => `(${ev.index}) ${ev.time} ${ev.summary}`).join(' ');
+    const timeDesc = dateInfo.type === 'timeLater' ? ` (${dateInfo.timeDescription} 후)` : '';
+    return `${responseData.dateInfo}${timeDesc} 일정입니다. ${eventList}`;
+  }
+  
+  // 4. 날짜 정보 요청
+  if (/(날짜|며칠)/.test(lowerQuery)) {
+    if (responseData.relativeText === '지금') {
+      return responseData.dateInfo;
+    } else {
+      return `${responseData.dateInfo}입니다.`;
+    }
+  }
+  
+  // 4. 기본 응답
+  return `${responseData.dateInfo}입니다.`;
+};
