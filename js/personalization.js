@@ -1,4 +1,4 @@
-const { fetchWeatherData } = require('./weather');
+const { fetchWeatherData, environmentalAwareness } = require('./weather');
 const { fetchTodayEvents } = require('./calendar');
 const { log } = require('./logging');
 
@@ -66,7 +66,7 @@ class PersonalizationSystem {
   }
 
   // 개인화된 메시지 생성
-  async generatePersonalizedMessage(broadcast, environmentalAwareness) {
+  async generatePersonalizedMessage(broadcast, envAwareness = null) {
     const now = new Date();
     const hour = now.getHours();
     const dayOfWeek = now.getDay();
@@ -76,10 +76,11 @@ class PersonalizationSystem {
       // 현재 상황 분석
       const context = await this.analyzeCurrentContext();
       
-      // 환경 인식 기반 메시지 우선 생성
-      const weatherSuggestion = environmentalAwareness.getWeatherBasedSuggestions(context.weather);
-      const seasonalContent = environmentalAwareness.getSeasonalContent();
-      const timeSuggestion = environmentalAwareness.getTimeBasedSuggestions(hour);
+      // 환경 인식 기반 메시지 우선 생성 (매개변수 또는 import된 객체 사용)
+      const envAwarenessObj = envAwareness || environmentalAwareness;
+      const weatherSuggestion = envAwarenessObj?.getWeatherBasedSuggestions?.(context.weather);
+      const seasonalContent = envAwarenessObj?.getSeasonalContent?.();
+      const timeSuggestion = envAwarenessObj?.getTimeBasedSuggestions?.(hour);
       
       // 우선순위에 따른 메시지 선택
       let selectedMessage = null;
@@ -262,12 +263,12 @@ class PersonalizationSystem {
   }
 
   // 메시지 업데이트 시작
-  startMessageUpdates(broadcast, environmentalAwareness) {
+  startMessageUpdates(broadcast, envAwareness = null) {
     // 3분마다 메시지 다양성 업데이트 (메시지 타입 변경)
     this.messageVarietyInterval = setInterval(async () => {
       // 메시지 타입을 리셋하여 새로운 메시지 생성 유도
       this.lastMessageType = '';
-      const newMessage = await this.generatePersonalizedMessage(broadcast, environmentalAwareness);
+      const newMessage = await this.generatePersonalizedMessage(broadcast, envAwareness);
       if (newMessage && newMessage !== this.currentMessage) {
         this.currentMessage = newMessage;
         // WebSocket을 통해 클라이언트에 전송
@@ -283,7 +284,7 @@ class PersonalizationSystem {
 
     // 5분마다 상황 변화에 따른 메시지 업데이트
     this.messageUpdateInterval = setInterval(async () => {
-      const newMessage = await this.generatePersonalizedMessage(broadcast, environmentalAwareness);
+      const newMessage = await this.generatePersonalizedMessage(broadcast, envAwareness);
       if (newMessage && newMessage !== this.currentMessage) {
         this.currentMessage = newMessage;
         // WebSocket을 통해 클라이언트에 전송
@@ -299,7 +300,7 @@ class PersonalizationSystem {
 
     // 초기 메시지 생성을 약간 지연시켜 다른 함수들이 정의된 후 실행
     setTimeout(async () => {
-      const message = await this.generatePersonalizedMessage(broadcast, environmentalAwareness);
+      const message = await this.generatePersonalizedMessage(broadcast, envAwareness);
       this.currentMessage = message;
       if (broadcast) {
         broadcast({ 

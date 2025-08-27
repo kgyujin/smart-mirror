@@ -224,9 +224,9 @@ const checkTokenExists = () => {
     CREDENTIALS_PATH,
     TOKEN_PATH,
     PROTO_PATH,
-    path.join(__dirname, '..', 'google/api/annotations.proto'),
-    path.join(__dirname, '..', 'google/api/http.proto'),
-    path.join(__dirname, '..', 'google/type/latlng.proto')
+    path.join(__dirname, '..', 'test/google/api/annotations.proto'),
+    path.join(__dirname, '..', 'test/google/api/http.proto'),
+    path.join(__dirname, '..', 'test/google/type/latlng.proto')
   ];
   
   for (const file of requiredFiles) {

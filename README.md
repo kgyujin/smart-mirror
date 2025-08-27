@@ -54,7 +54,7 @@ mirror-app/
 ├─ public/
 │  └─ index.html
 ├─ app.js.backup
-├─ main.js
+├─ app.js
 └─ README.md
 ```
 
@@ -97,7 +97,7 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
    ```
 4. 서버 실행
    ```bash
-   node main.js
+   node app.js
    ```
 5. 웹 인터페이스 접속
    ```

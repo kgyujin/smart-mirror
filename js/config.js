@@ -15,7 +15,7 @@ const CALENDAR_SOURCES_FILE = path.join(__dirname, '..', 'calendar_sources.json'
 const CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, '..', 'tokens.json');
 const SPEECH_CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials_serviceAccount.json');
-const PROTO_PATH = path.join(__dirname, '..', 'google/assistant/embedded/v1alpha2/embedded_assistant.proto');
+const PROTO_PATH = path.join(__dirname, '..', 'test/google/assistant/embedded/v1alpha2/embedded_assistant.proto');
 
 // TTS 설정
 const CAPTION_HIDE_AFTER_TTS_MS = Number(process.env.CAPTION_HIDE_AFTER_TTS_MS || 3000);
