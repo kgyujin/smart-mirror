@@ -1,0 +1,84 @@
+    :root {
+      --bg: #000;
+      --text: #e9eef5;
+      --muted: #9aa7b1;
+      --accent: #57c7ff;
+      --panel: rgba(255, 255, 255, 0.06);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --success: #3ddc97;
+      --warning: #ffd166;
+      --error: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, 'Noto Sans KR', sans-serif;
+      letter-spacing: 0.1px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { display: grid; grid-template-rows: auto 1fr auto; height: 100%; padding: 24px; gap: 24px; }
+    /* 기본: 세로(포트레이트) 우선 레이아웃 */
+    .top { display: grid; grid-template-columns: 1fr; gap: 24px; align-items: start; }
+    .middle { display: grid; grid-template-columns: 1fr; gap: 24px; }
+    .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px; padding: 16px 18px; backdrop-filter: blur(6px); }
+    .panel h2 { margin: 0 0 12px 0; font-size: 18px; color: var(--muted); font-weight: 600; }
+
+    /* DateTime */
+    #dateTime .time { font-size: 84px; font-weight: 700; line-height: 1; }
+    #dateTime .date { font-size: 22px; color: var(--muted); margin-top: 6px; }
+    #advice { 
+      margin-top: 14px; 
+      font-size: 18px; 
+      color: var(--success); 
+      font-weight: 500;
+      min-height: 1.2em;
+      transition: opacity 0.3s ease;
+    }
+    #advice:empty { opacity: 0; }
+    #advice:not(:empty) { opacity: 1; }
+
+    /* Weather */
+    #weather .temp { font-size: 48px; font-weight: 700; }
+    #weather .desc { color: var(--muted); margin-left: 8px; }
+    #weather .meta { margin-top: 8px; color: var(--muted); font-size: 14px; }
+
+    /* List */
+    .list { display: grid; gap: 10px; }
+    .item { padding: 10px 12px; border: 1px solid var(--panel-border); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .item:hover { background: rgba(255, 255, 255, 0.06); }
+    .item .left { display: flex; gap: 10px; align-items: baseline; }
+    .item .time { color: var(--muted); font-size: 14px; }
+    .item .title { font-weight: 600; }
+    .item.past { opacity: 0.55; }
+    .item.current { border-color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.08); box-shadow: 0 0 0 2px rgba(255,255,255,0.18) inset; }
+
+    /* Bottom */
+    .bottom { position: relative; }
+    #captions { position: fixed; left: 24px; right: 24px; bottom: 88px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+    .caption { background: rgba(0,0,0,0.55); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; max-width: 80%; transition: opacity .4s ease; }
+    .caption.user { align-self: flex-start; }
+    .caption.assistant { align-self: flex-end; }
+    .caption .role { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    .caption .text { font-size: 18px; }
+    .caption.ephemeral { opacity: 0.8; }
+
+    .controls { position: fixed; left: 24px; right: 24px; bottom: 24px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+    .pill { padding: 8px 12px; border-radius: 999px; border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); }
+    .btn { cursor: pointer; }
+    .btn:hover { filter: brightness(1.2); }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot-on { background: var(--success); }
+    .dot-off { background: var(--error); }
+
+    /* Listening window progress */
+    #listenBar { position: fixed; left: 24px; right: 24px; bottom: 72px; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+    #listenBar > span { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #7ef0ff); transition: width .2s ease; }
+
+    /* 가로(랜드스케이프)에서는 2열 그리드로 확장 */
+    @media (orientation: landscape) {
+      .top, .middle { grid-template-columns: 1fr 1fr; }
+      #dateTime .time { font-size: 72px; }
+    }
