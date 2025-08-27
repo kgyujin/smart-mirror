@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Smart Mirror</title>
+  
+  <!-- CSS -->
+  <link rel="stylesheet" href="../css/main.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- 헤더 영역 -->
+    <div class="top">
+      <div id="dateTime" class="panel">
+        <div class="time" id="time">--:--</div>
+        <div class="date" id="date">--</div>
+     p   <div class="advice" id="advice"></div>
+      </div>
+      <div id="weather" class="panel">
+        <h2>현재 날씨</h2>
+        <div>
+          <span class="temp" id="temp">--°C</span>
+          <span class="desc" id="weatherDesc"></span>
+        </div>
+        <div class="meta" id="weatherMeta"></div>
+      </div>
+    </div>
+
+    <!-- 메인 콘텐츠 영역 -->
+    <div class="middle">
+      <div id="calendar" class="panel">
+        <h2>오늘 일정</h2>
+        <div id="calendarList" class="list"></div>
+      </div>
+      <div id="news" class="panel">
+        <h2>주요 뉴스</h2>
+        <div id="newsList" class="list"></div>
+      </div>
+    </div>
+
+    <!-- 하단 영역 -->
+    <div class="bottom">
+      <div id="captions"></div>
+      <!--
+        Listening progress bar (was showing the remaining time after wake word).
+        Temporarily hidden per request to reduce UI clutter.
+        <div id="listenBar"><span></span></div>
+      -->
+      <div class="controls">
+        <div class="pill" id="micStatus"><span class="status-dot dot-off" id="micDot"></span><span id="micText">마이크 꺼짐</span></div>
+        <input class="pill" id="chatInput" placeholder="질문을 입력하세요... (예: 오늘 일정 어때?)" />
+        <button class="pill btn" id="sendBtn">보내기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript 모듈들 -->
+  <script src="../js/frontend/client-ui.js"></script>
+  <script src="../js/frontend/client-captions.js"></script>
+  <script src="../js/frontend/client-data.js"></script>
+  <script src="../js/frontend/client-render.js"></script>
+  <script src="../js/frontend/client-websocket.js"></script>
+  <script src="../js/frontend/client-chat.js"></script>
+  <script src="../js/frontend/client-main.js"></script>
+</body>
+</html>
