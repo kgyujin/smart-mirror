@@ -31,9 +31,9 @@ const formatEventTime = (start, end) => {
   } catch { return ''; }
 };
 
-const setMicUI = (on) => {
+const setMicUI = (on, message = null) => {
   $('micDot').className = `status-dot ${on ? 'dot-on' : 'dot-off'}`;
-  $('micText').textContent = on ? '마이크 켜짐' : '마이크 꺼짐';
+  $('micText').textContent = message || (on ? '마이크 켜짐' : '마이크 꺼짐');
 };
 
 const setListeningWindow = (remainingMs, totalMs) => {

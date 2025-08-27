@@ -217,7 +217,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
             hotwordMode = 'hotword';
             lastTranscriptAt = Date.now(); // 명령 처리 완료 시간 기록
             if (broadcast) {
-              broadcast({ type: 'status', status: 'listening_off' });
+              broadcast({ type: 'status', status: 'hotword_listening' }); // 상시 리스닝 상태로 변경
             }
             log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
           }
@@ -236,6 +236,11 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
   });
   micInstance.stream().on('error', (err) => log.error('마이크 오류:', err)).pipe(recognizeStream);
   log.info('상시 듣기 시작(핫워드: "미러야")');
+  
+  // 상시 리스닝 시작 상태 브로드캐스트
+  if (broadcast) {
+    broadcast({ type: 'status', status: 'hotword_listening' });
+  }
 };
 
 const stopContinuousHotwordListener = (broadcast) => {

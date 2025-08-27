@@ -272,6 +272,28 @@ const generateContextualResponse = async (userText, userIntent, contextSummary, 
   return null;
 };
 
+// 후속 질문인지 판별하는 함수
+const checkIfFollowUpQuestion = async (text, currentTopic, userIntent) => {
+  if (!currentTopic) return false;
+  
+  // 명확한 주제 전환 키워드가 있으면 후속 질문이 아님
+  const topicChangeKeywords = ['날씨', '뉴스', '시간', '날짜', '일정', '캘린더'];
+  const hasTopicChange = topicChangeKeywords.some(keyword => text.includes(keyword));
+  
+  if (hasTopicChange && !text.includes(currentTopic)) return false;
+  
+  // 후속 질문을 나타내는 패턴들
+  const followUpPatterns = [
+    /^(그럼|그러면|그래서|그리고|또|추가로|더|다른|다시|아까|그거|그것|그|이것|이거)/,
+    /^(어떻게|왜|언제|어디서|뭐|무엇|누가|얼마나)/,
+    /^(맞아|맞네|그렇구나|아|오|우와|진짜|정말)/,
+    /(어때|어떨까|괜찮을까|좋을까|나쁠까)$/,
+    /(더|추가|또|그리고|아직)(\s+\w+)?$/
+  ];
+  
+  return followUpPatterns.some(pattern => pattern.test(text.trim()));
+};
+
 const handleRoutineStep = async (userId, stepId, userResponse, personalizedRoutine) => {
   const routine = personalizedRoutine.getRoutineSummary(userId);
   if (!routine) return null;
@@ -395,9 +417,13 @@ const processRecognizedCommand = async (text, dependencies) => {
     // 날짜 정보 파싱
     const dateInfo = parseRelativeDate(trimmed);
     
+    // 맥락 기반 후속 질문 처리
+    const currentTopic = contextSummary.currentTopic;
+    const isFollowUpQuestion = await checkIfFollowUpQuestion(trimmed, currentTopic, userIntent);
+    
     // 우선순위 기반 명령 처리
-    // 1. 뉴스 관련 질문
-    if (/뉴스/.test(trimmed)) {
+    // 1. 뉴스 관련 질문 (직접 언급하거나 후속 질문)
+    if (/뉴스/.test(trimmed) || (isFollowUpQuestion && currentTopic === 'news')) {
       try {
         const newsRes = await processNewsQuery(trimmed);
         reply = newsRes.response || '뉴스 정보를 불러올 수 없습니다.';
@@ -406,11 +432,18 @@ const processRecognizedCommand = async (text, dependencies) => {
       }
       conversationContext.setCurrentTopic(userId, 'news');
     }
-    // 2. 날씨 관련 질문
-    else if (/날씨/.test(trimmed)) {
+    // 2. 날씨 관련 질문 (직접 언급하거나 후속 질문)
+    else if (/날씨|온도|기온|춥|덥|비|눈/.test(trimmed) || (isFollowUpQuestion && currentTopic === 'weather')) {
       try {
         const weatherData = await fetchWeatherData();
-        reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
+        if (/(춥|덥|기온|온도)/.test(trimmed)) {
+          const temp = Math.round(weatherData.main.temp);
+          if (temp < 10) reply = `현재 ${temp}도로 춥습니다. 따뜻하게 입으세요.`;
+          else if (temp > 25) reply = `현재 ${temp}도로 덥습니다. 시원하게 입으세요.`;
+          else reply = `현재 ${temp}도로 적당한 날씨입니다.`;
+        } else {
+          reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
+        }
       } catch {
         reply = '날씨 정보를 불러오지 못했습니다.';
       }
@@ -427,9 +460,16 @@ const processRecognizedCommand = async (text, dependencies) => {
       reply = `오늘은 ${formatKSTDate()}입니다.`;
       if (/(요일)/.test(trimmed)) reply += ` ${weekday}입니다.`;
     }
-    // 5. 일반 대화는 GPT에 위임
+    // 5. 맥락 기반 응답 시도 (이전 대화와 연결)
     else {
-      reply = await answerWithGPT(trimmed, {}, openai);
+      // 먼저 맥락적 응답 시도
+      const contextualReply = await generateContextualResponse(trimmed, userIntent, contextSummary, openai);
+      if (contextualReply) {
+        reply = contextualReply;
+      } else {
+        // 맥락이 없으면 일반 GPT 응답
+        reply = await answerWithGPT(trimmed, contextSummary, openai);
+      }
     }
     
     conversationContext.addMessage(userId, 'assistant', reply);
@@ -483,24 +523,48 @@ const sanitizeAssistantText = (text) => {
 
 const getWeekdayShortKorean = (dateLike) => ['일','월','화','수','목','금','토'][new Date(dateLike).getDay()];
 
-// GPT 기반 일반 대화
+// GPT 기반 일반 대화 (맥락 포함)
 const answerWithGPT = async (userText, extraContext = {}, openai) => {
   try {
     const text = (userText || '').toLowerCase();
     
     if (!openai) return 'GPT API 키가 설정되지 않았습니다.';
     
-    const system = '당신은 한국어 스마트 미러 비서입니다. 아주 간결하고 실용적으로 답변하세요. 인사말/작별 인사/후속 질문 금지. 한 문장 또는 짧은 불릿만.';
-    const user = `사용자 발화: ${userText}`;
+    // 맥락 정보 구성
+    const contextInfo = extraContext.recentMessages || [];
+    const currentTopic = extraContext.currentTopic;
+    
+    let systemPrompt = '당신은 한국어 스마트 미러 비서입니다. 간결하고 실용적으로 답변하세요. 1-2문장으로 답변.';
+    
+    if (currentTopic) {
+      systemPrompt += `\n현재 대화 주제: ${currentTopic}`;
+    }
+    
+    if (contextInfo.length > 0) {
+      systemPrompt += '\n이전 대화를 참고하여 자연스럽게 연결된 답변을 하세요.';
+    }
+    
+    const messages = [{ role: 'system', content: systemPrompt }];
+    
+    // 최근 대화 맥락 추가 (최대 4개)
+    if (contextInfo.length > 0) {
+      const recentContext = contextInfo.slice(-4);
+      recentContext.forEach(msg => {
+        messages.push({
+          role: msg.role === 'user' ? 'user' : 'assistant',
+          content: msg.content
+        });
+      });
+    }
+    
+    // 현재 사용자 질문 추가
+    messages.push({ role: 'user', content: userText });
     
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      temperature: 0.3,
-      max_tokens: 200,
+      messages: messages,
+      temperature: 0.4,
+      max_tokens: 150,
     });
     
     const raw = completion.choices?.[0]?.message?.content?.trim() || '';
