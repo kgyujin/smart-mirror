@@ -178,6 +178,14 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
         if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcript)) {
           // TTS 중에는 호출어를 무시하고, TTS 종료 후 바로 다음 호출에서 반응
           if (isTTSActive()) {
+            log.verbose('TTS 진행 중이므로 호출어 무시:', transcript);
+            return;
+          }
+          
+          // TTS 종료 후 짧은 시간(2초) 대기로 에코 방지
+          const timeSinceLastTranscript = Date.now() - lastTranscriptAt;
+          if (timeSinceLastTranscript < 2000) {
+            log.verbose('최근 명령 처리 후 대기 시간 중, 호출어 무시:', transcript);
             return;
           }
           hotwordMode = 'command';
@@ -207,9 +215,11 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
             }
             await processRecognizedCommand(finalCommand);
             hotwordMode = 'hotword';
+            lastTranscriptAt = Date.now(); // 명령 처리 완료 시간 기록
             if (broadcast) {
               broadcast({ type: 'status', status: 'listening_off' });
             }
+            log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
           }
         }
       } catch (e) {

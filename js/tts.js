@@ -38,6 +38,7 @@ const stopTTS = () => {
     log.error('TTS 중단 오류:', e);
   } finally {
     currentTTSProcess = null;
+    isTTSActive = false; // 강제 중단 시에도 상태 초기화
   }
 };
 
@@ -50,6 +51,16 @@ const safeTTS = async (text, broadcast) => {
   if (broadcast) {
     broadcast({ type: 'tts', status: 'start', text });
   }
+  
+  // TTS 타임아웃 설정 (15초)
+  const ttsTimeout = setTimeout(() => {
+    log.warn('TTS 타임아웃, 강제 종료');
+    stopTTS();
+    isTTSActive = false;
+    if (broadcast) {
+      broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+    }
+  }, 15000);
   
   // Google Cloud TTS 우선 사용
   if (ttsClient) {
@@ -96,6 +107,7 @@ const safeTTS = async (text, broadcast) => {
                   log.error('aplay 재생 실패:', aplayErr.message);
                 }
                 try { fs.unlinkSync(wavPath); } catch {}
+                clearTimeout(ttsTimeout);
                 isTTSActive = false;
                 if (broadcast) {
                   broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -110,6 +122,7 @@ const safeTTS = async (text, broadcast) => {
           } catch {}
         }
         try { fs.unlinkSync(wavPath); } catch {}
+        clearTimeout(ttsTimeout);
         isTTSActive = false;
         if (broadcast) {
           broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -134,6 +147,7 @@ const safeTTS = async (text, broadcast) => {
       } else {
         log.tts('완료:', text);
       }
+      clearTimeout(ttsTimeout);
       isTTSActive = false;
       if (broadcast) {
         broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -145,6 +159,7 @@ const safeTTS = async (text, broadcast) => {
     }
   } catch (error) {
     log.error('TTS 실행 오류:', error);
+    clearTimeout(ttsTimeout);
     isTTSActive = false;
     if (broadcast) {
       broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
