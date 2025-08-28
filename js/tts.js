@@ -20,6 +20,9 @@ try {
 // 현재 TTS 진행 여부 (TTS 중에는 호출어를 무시)
 let isTTSActive = false;
 
+// TTS 상태 확인 함수
+const getTTSActive = () => isTTSActive;
+
 // TTS 제어
 let currentTTSProcess = null;
 
@@ -170,6 +173,6 @@ const safeTTS = async (text, broadcast) => {
 module.exports = {
   safeTTS,
   stopTTS,
-  isTTSActive,
+  isTTSActive: getTTSActive,
   ttsClient
 };
