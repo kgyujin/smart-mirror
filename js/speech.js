@@ -120,7 +120,7 @@ const startListeningWindowTicker = (broadcast) => {
   }, LISTENING_BROADCAST_INTERVAL_MS);
 };
 
-const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isTTSActive) => {
+const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => {
   if (isMicListening) return;
   isMicListening = true;
   hotwordMode = 'hotword';
@@ -157,7 +157,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
         broadcast({ type: 'status', status: 'stt_error', message: err.message });
       }
       stopContinuousHotwordListener(broadcast);
-      setTimeout(() => startContinuousHotwordListener(processRecognizedCommand, broadcast, isTTSActive), 3000);
+      setTimeout(() => startContinuousHotwordListener(processRecognizedCommand, broadcast), 3000);
     })
     .on('data', async (data) => {
       try {
@@ -172,12 +172,6 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
         
         // 호출어 모드에서 호출어 인식
         if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcript)) {
-          // TTS 중에는 호출어를 무시
-          if (isTTSActive && isTTSActive()) {
-            log.verbose('TTS 진행 중이므로 호출어 무시:', transcript);
-            return;
-          }
-          
           log.info('호출어 인식됨:', transcript);
           hotwordMode = 'command';
           commandBuffer = '';
@@ -218,7 +212,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
             hotwordMode = 'hotword';
             lastTranscriptAt = Date.now();
             if (broadcast) {
-              broadcast({ type: 'status', status: 'hotword_listening' });
+              broadcast({ type: 'status', status: 'listening_off' });
             }
             log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
           }
@@ -240,7 +234,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
   
   // 상시 리스닝 시작 상태 브로드캐스트
   if (broadcast) {
-    broadcast({ type: 'status', status: 'hotword_listening' });
+    broadcast({ type: 'status', status: 'listening_off' });
   }
 };
 

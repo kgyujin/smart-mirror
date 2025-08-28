@@ -353,8 +353,7 @@ app.post('/api/mic/toggle', (req, res) => {
     
     startContinuousHotwordListener(
       (text) => processRecognizedCommand(text, dependencies),
-      broadcast,
-      isTTSActive
+      broadcast
     );
     res.json({ listening: true });
   } catch (e) {
@@ -458,8 +457,7 @@ if (ALWAYS_LISTEN) {
   
   startContinuousHotwordListener(
     (text) => processRecognizedCommand(text, dependencies),
-    broadcast,
-    isTTSActive
+    broadcast
   );
 }
 

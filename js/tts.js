@@ -55,16 +55,6 @@ const safeTTS = async (text, broadcast) => {
     broadcast({ type: 'tts', status: 'start', text });
   }
   
-  // TTS 타임아웃 설정 (15초)
-  const ttsTimeout = setTimeout(() => {
-    log.warn('TTS 타임아웃, 강제 종료');
-    stopTTS();
-    isTTSActive = false;
-    if (broadcast) {
-      broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
-    }
-  }, 15000);
-  
   // Google Cloud TTS 우선 사용
   if (ttsClient) {
     try {
@@ -94,38 +84,37 @@ const safeTTS = async (text, broadcast) => {
       // 플랫폼별 재생 방법 선택
       let playCmd = '';
       if (process.platform === 'win32') {
-        // PowerShell SoundPlayer 동기 재생
+        // Windows: PowerShell SoundPlayer 사용
         const psPath = wavPath.replace(/\\/g, '/');
         playCmd = `powershell -NoProfile -Command $p=New-Object System.Media.SoundPlayer; $p.SoundLocation='${psPath}'; $p.Load(); $p.PlaySync()`;
       } else {
-        playCmd = `play -q "${wavPath}"`;
+        // Linux: aplay 사용 (가장 안정적)
+        playCmd = `aplay -q "${wavPath}"`;
       }
       currentTTSProcess = exec(playCmd, (error) => {
         if (error) {
-          log.warn('기본 재생 실패, aplay로 재시도:', error.message);
+          log.warn('기본 재생 실패, espeak로 재시도:', error.message);
           try {
-            if (process.platform !== 'win32') {
-              currentTTSProcess = exec(`aplay -q "${wavPath}"`, (aplayErr) => {
-                if (aplayErr) {
-                  log.error('aplay 재생 실패:', aplayErr.message);
-                }
-                try { fs.unlinkSync(wavPath); } catch {}
-                clearTimeout(ttsTimeout);
-                isTTSActive = false;
-                if (broadcast) {
-                  broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
-                }
-              });
-              if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
-                currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
-                currentTTSProcess.on('close', () => { currentTTSProcess = null; });
+            // espeak로 직접 텍스트 재생 (WAV 파일 없이)
+            const espeakCmd = `echo "${text.replace(/"/g, '\\"')}" | espeak -v ko -s 150`;
+            currentTTSProcess = exec(espeakCmd, (espeakErr) => {
+              if (espeakErr) {
+                log.error('espeak 재생 실패:', espeakErr.message);
               }
-              return;
+              try { fs.unlinkSync(wavPath); } catch {}
+              isTTSActive = false;
+              if (broadcast) {
+                broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+              }
+            });
+            if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
+              currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
+              currentTTSProcess.on('close', () => { currentTTSProcess = null; });
             }
+            return;
           } catch {}
         }
         try { fs.unlinkSync(wavPath); } catch {}
-        clearTimeout(ttsTimeout);
         isTTSActive = false;
         if (broadcast) {
           broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -150,7 +139,6 @@ const safeTTS = async (text, broadcast) => {
       } else {
         log.tts('완료:', text);
       }
-      clearTimeout(ttsTimeout);
       isTTSActive = false;
       if (broadcast) {
         broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -162,7 +150,6 @@ const safeTTS = async (text, broadcast) => {
     }
   } catch (error) {
     log.error('TTS 실행 오류:', error);
-    clearTimeout(ttsTimeout);
     isTTSActive = false;
     if (broadcast) {
       broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
