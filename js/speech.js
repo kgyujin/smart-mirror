@@ -167,27 +167,18 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
         const isFinal = !!result.isFinal;
         if (!transcript) return;
         lastTranscriptAt = Date.now();
-        // Only show live captions when in command mode and exclude wakewords
-        if (hotwordMode === 'command') {
-          const cleanText = transcript.replace(WAKEWORD_REMOVE, '').trim();
-          if (cleanText && broadcast) {
-            broadcast({ type: 'transcript', role: 'user', text: cleanText, final: isFinal, mode: hotwordMode });
-          }
-        }
-
+        
+        log.verbose('음성 인식 결과:', transcript, 'isFinal:', isFinal, 'mode:', hotwordMode);
+        
+        // 호출어 모드에서 호출어 인식
         if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcript)) {
-          // TTS 중에는 호출어를 무시하고, TTS 종료 후 바로 다음 호출에서 반응
-          if (isTTSActive()) {
+          // TTS 중에는 호출어를 무시
+          if (isTTSActive && isTTSActive()) {
             log.verbose('TTS 진행 중이므로 호출어 무시:', transcript);
             return;
           }
           
-          // TTS 종료 후 짧은 시간(2초) 대기로 에코 방지
-          const timeSinceLastTranscript = Date.now() - lastTranscriptAt;
-          if (timeSinceLastTranscript < 2000) {
-            log.verbose('최근 명령 처리 후 대기 시간 중, 호출어 무시:', transcript);
-            return;
-          }
+          log.info('호출어 인식됨:', transcript);
           hotwordMode = 'command';
           commandBuffer = '';
           if (broadcast) {
@@ -199,8 +190,15 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
           return;
         }
 
+        // 명령 모드에서 사용자 명령 처리
         if (hotwordMode === 'command') {
-          // 사용자가 말하는 동안에는 대기만 하고, 최종 문장 확정 시에만 처리
+          // Only show live captions when in command mode and exclude wakewords
+          const cleanText = transcript.replace(WAKEWORD_REMOVE, '').trim();
+          if (cleanText && broadcast) {
+            broadcast({ type: 'transcript', role: 'user', text: cleanText, final: isFinal, mode: hotwordMode });
+          }
+
+          // 최종 문장 확정 시에만 처리
           if (isFinal) {
             const finalCommand = transcript.replace(WAKEWORD_REMOVE, '').trim();
             // 호출어만 인식되었거나 아직 내용이 없는 경우에는 계속 대기
@@ -208,16 +206,19 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, isT
               lastTranscriptAt = Date.now();
               return;
             }
+            
+            log.info('명령 인식됨:', finalCommand);
             commandBuffer = '';
             stopListeningWindowTicker(true, broadcast);
             if (broadcast) {
               broadcast({ type: 'status', status: 'processing' });
             }
+            
             await processRecognizedCommand(finalCommand);
             hotwordMode = 'hotword';
-            lastTranscriptAt = Date.now(); // 명령 처리 완료 시간 기록
+            lastTranscriptAt = Date.now();
             if (broadcast) {
-              broadcast({ type: 'status', status: 'hotword_listening' }); // 상시 리스닝 상태로 변경
+              broadcast({ type: 'status', status: 'hotword_listening' });
             }
             log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
           }

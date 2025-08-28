@@ -354,7 +354,7 @@ const processRecognizedCommand = async (text, dependencies) => {
   let reply = '';
   
   try {
-    // 우선순위 기반 명령 처리 (backup 파일의 간단하고 효과적인 방식)
+    // backup 파일의 간단하고 효과적인 방식
     // 1. 뉴스 관련 질문
     if (/뉴스/.test(trimmed)) {
       try {
@@ -363,24 +363,15 @@ const processRecognizedCommand = async (text, dependencies) => {
       } catch {
         reply = '뉴스 정보를 가져오는 데 실패했습니다.';
       }
-      conversationContext.setCurrentTopic(userId, 'news');
     }
     // 2. 날씨 관련 질문
-    else if (/날씨|온도|기온|춥|덥|비|눈/.test(trimmed)) {
+    else if (/날씨/.test(trimmed)) {
       try {
         const weatherData = await fetchWeatherData();
-        if (/(춥|덥|기온|온도)/.test(trimmed)) {
-          const temp = Math.round(weatherData.main.temp);
-          if (temp < 10) reply = `현재 ${temp}도로 춥습니다. 따뜻하게 입으세요.`;
-          else if (temp > 25) reply = `현재 ${temp}도로 덥습니다. 시원하게 입으세요.`;
-          else reply = `현재 ${temp}도로 적당한 날씨입니다.`;
-        } else {
-          reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
-        }
+        reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
       } catch {
         reply = '날씨 정보를 불러오지 못했습니다.';
       }
-      conversationContext.setCurrentTopic(userId, 'weather');
     }
     // 3. 시간 질문
     else if (/(몇\s*시|현재\s*시간|지금\s*시간|time)/i.test(trimmed)) {
