@@ -53,6 +53,62 @@
   transform: scale(0.98);
 }
 
+/* 감정 분석 표시 */
+.emotion-info {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+  animation: slideInRight 0.3s ease-out;
+}
+
+.emotion-icon {
+  font-size: 24px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+}
+
+.emotion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.emotion-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.emotion-confidence {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
     /* Weather */
     #weather .temp { font-size: 48px; font-weight: 700; }
     #weather .desc { color: var(--muted); margin-left: 8px; }

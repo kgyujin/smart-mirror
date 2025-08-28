@@ -38,6 +38,17 @@ function initWS() {
       } else if (msg.type === 'personalized_message') {
         // 개인화된 메시지 업데이트
         $('advice').textContent = msg.message || '';
+      } else if (msg.type === 'emotion_analysis') {
+        // 감정 분석 결과 표시
+        displayEmotionAnalysis({
+          emotion: msg.emotion,
+          confidence: msg.confidence
+        });
+        
+        // 감정 기반 응답이 있으면 자막으로 표시
+        if (msg.response) {
+          addCaption('assistant', msg.response, { autohideMs: 6000 });
+        }
       }
     } catch (e) {}
   };

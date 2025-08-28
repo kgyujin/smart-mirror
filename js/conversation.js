@@ -3,6 +3,7 @@ const { PORT } = require('./config');
 const { log } = require('./logging');
 const { fetchWeatherData } = require('./weather');
 const { fetchTodayEvents, formatKSTTimeFromISO, fetchEventsForDay } = require('./calendar');
+const { EmotionAnalysisSystem } = require('./emotion-analysis');
 
 // 대화 컨텍스트 관리 시스템
 class ConversationContext {
@@ -344,7 +345,8 @@ const processRecognizedCommand = async (text, dependencies) => {
     isPureDateQuery,
     formatKSTTime,
     formatKSTDate,
-    processNewsQuery
+    processNewsQuery,
+    emotionAnalysisSystem
   } = dependencies;
   
   const trimmed = (text || '').trim();
@@ -492,7 +494,38 @@ const processRecognizedCommand = async (text, dependencies) => {
         reply = '요청을 처리하는 데 실패했습니다.';
       }
     }
-    // 5. 일반 대화는 GPT에 위임
+    // 5. 감정 분석 관련 질문
+    else if (/(감정|기분|마음|상태|어떤\s*기분|어떤\s*감정)/.test(trimmed)) {
+      if (emotionAnalysisSystem) {
+        const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+        if (currentEmotion.emotion && currentEmotion.confidence > 0.5) {
+          const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
+            currentEmotion.emotion, 
+            currentEmotion.confidence
+          );
+          reply = emotionResponse.response;
+        } else {
+          reply = '아직 충분한 음성 데이터가 없어서 감정을 분석하기 어려워요. 조금 더 말씀해 주시면 분석해드릴게요.';
+        }
+      } else {
+        reply = '감정 분석 시스템이 준비되지 않았습니다.';
+      }
+    }
+    // 6. 음악 추천 요청
+    else if (/(음악|노래|플레이리스트|추천|들어보고|듣고싶)/.test(trimmed)) {
+      if (emotionAnalysisSystem) {
+        const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+        if (currentEmotion.emotion) {
+          const musicRecommendation = emotionAnalysisSystem.getMusicRecommendation(currentEmotion.emotion);
+          reply = `현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`;
+        } else {
+          reply = '기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?';
+        }
+      } else {
+        reply = '음악 추천 시스템이 준비되지 않았습니다.';
+      }
+    }
+    // 7. 일반 대화는 GPT에 위임
     else {
       reply = await answerWithGPT(trimmed, {}, openai);
     }

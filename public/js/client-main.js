@@ -34,6 +34,66 @@ $('advice').addEventListener('click', async () => {
   }
 });
 
+// 감정 분석 결과 표시
+function displayEmotionAnalysis(emotionData) {
+  if (emotionData.emotion && emotionData.confidence > 0.5) {
+    const emotionElement = document.getElementById('emotion-display');
+    if (!emotionElement) {
+      // 감정 표시 요소가 없으면 생성
+      const newEmotionElement = document.createElement('div');
+      newEmotionElement.id = 'emotion-display';
+      newEmotionElement.className = 'emotion-info';
+      newEmotionElement.innerHTML = `
+        <div class="emotion-icon">${getEmotionIcon(emotionData.emotion)}</div>
+        <div class="emotion-text">
+          <div class="emotion-label">${getEmotionLabel(emotionData.emotion)}</div>
+          <div class="emotion-confidence">${Math.round(emotionData.confidence * 100)}%</div>
+        </div>
+      `;
+      document.body.appendChild(newEmotionElement);
+    } else {
+      // 기존 요소 업데이트
+      emotionElement.innerHTML = `
+        <div class="emotion-icon">${getEmotionIcon(emotionData.emotion)}</div>
+        <div class="emotion-text">
+          <div class="emotion-label">${getEmotionLabel(emotionData.emotion)}</div>
+          <div class="emotion-confidence">${Math.round(emotionData.confidence * 100)}%</div>
+        </div>
+      `;
+    }
+  }
+}
+
+// 감정 아이콘 반환
+function getEmotionIcon(emotion) {
+  const icons = {
+    'happy': '😊',
+    'sad': '😢',
+    'angry': '😠',
+    'calm': '😌',
+    'surprised': '😲',
+    'fearful': '😨',
+    'disgust': '🤢',
+    'neutral': '😐'
+  };
+  return icons[emotion] || '😐';
+}
+
+// 감정 라벨 반환
+function getEmotionLabel(emotion) {
+  const labels = {
+    'happy': '행복',
+    'sad': '슬픔',
+    'angry': '분노',
+    'calm': '평온',
+    'surprised': '놀람',
+    'fearful': '두려움',
+    'disgust': '혐오',
+    'neutral': '중립'
+  };
+  return labels[emotion] || '알 수 없음';
+}
+
 // 클릭 시 모든 자막 서서히 제거
 document.addEventListener('click', () => {
   document.querySelectorAll('#captions .caption').forEach(el => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); });

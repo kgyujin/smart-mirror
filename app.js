@@ -45,6 +45,7 @@ const {
   speechClient,
   isMicListening
 } = require('./js/speech');
+const { EmotionAnalysisSystem } = require('./js/emotion-analysis');
 const { PersonalizationSystem } = require('./js/personalization');
 const { 
   ConversationContext, 
@@ -68,6 +69,7 @@ app.use(express.json());
 const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
 const personalizedRoutine = new PersonalizedRoutine();
+const emotionAnalysisSystem = new EmotionAnalysisSystem();
 
 // WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
@@ -348,7 +350,8 @@ app.post('/api/mic/toggle', (req, res) => {
       isPureDateQuery,
       formatKSTTime,
       formatKSTDate,
-      processNewsQuery
+      processNewsQuery,
+      emotionAnalysisSystem
     };
     
     startContinuousHotwordListener(
@@ -411,6 +414,48 @@ app.post('/api/personalized-message/change', async (req, res) => {
   }
 });
 
+// 감정 분석 API
+app.get('/api/emotion', (req, res) => {
+  try {
+    const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+    res.json({
+      emotion: currentEmotion.emotion,
+      confidence: currentEmotion.confidence,
+      history: currentEmotion.history,
+      trend: currentEmotion.trend,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    log.error('감정 분석 API 오류:', error);
+    res.status(500).json({ error: '감정 분석 정보를 가져오지 못했습니다.' });
+  }
+});
+
+// 감정 기반 추천 API
+app.get('/api/emotion/recommendations', (req, res) => {
+  try {
+    const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+    if (currentEmotion.emotion) {
+      const recommendations = emotionAnalysisSystem.getEmotionBasedRecommendations(currentEmotion.emotion);
+      res.json({
+        emotion: currentEmotion.emotion,
+        recommendations: recommendations,
+        timestamp: Date.now()
+      });
+    } else {
+      res.json({
+        emotion: 'unknown',
+        recommendations: null,
+        message: '아직 충분한 음성 데이터가 없습니다.',
+        timestamp: Date.now()
+      });
+    }
+  } catch (error) {
+    log.error('감정 추천 API 오류:', error);
+    res.status(500).json({ error: '감정 기반 추천을 가져오지 못했습니다.' });
+  }
+});
+
 // 헬스체크 API
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();
@@ -455,24 +500,25 @@ personalizationSystem.startMessageUpdates(broadcast, environmentalAwareness);
 
 // 상시 리스닝 시작
 if (ALWAYS_LISTEN) {
-  const dependencies = {
-    conversationContext,
-    personalizedRoutine,
-    personalizationSystem,
-    openai,
-    broadcast,
-    safeTTS,
-    parseRelativeDate,
-    isPureDateQuery,
-    formatKSTTime,
-    formatKSTDate,
-    processNewsQuery
-  };
-  
-  startContinuousHotwordListener(
-    (text) => processRecognizedCommand(text, dependencies),
-    broadcast
-  );
+      const dependencies = {
+      conversationContext,
+      personalizedRoutine,
+      personalizationSystem,
+      openai,
+      broadcast,
+      safeTTS,
+      parseRelativeDate,
+      isPureDateQuery,
+      formatKSTTime,
+      formatKSTDate,
+      processNewsQuery,
+      emotionAnalysisSystem
+    };
+    
+    startContinuousHotwordListener(
+      (text) => processRecognizedCommand(text, dependencies),
+      broadcast
+    );
 }
 
 // 프로세스 종료 시 정리

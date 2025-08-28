@@ -16,6 +16,9 @@ AI 기반 한국어 스마트 미러 애플리케이션으로, 음성 인식, TT
 | 음성 인식 | "미러야", "하이 미러" 웨이크워드로 음성 명령 수신 |
 | TTS 음성 합성 | Google Cloud TTS로 자연스러운 한국어 음성 출력 |
 | AI 대화 | OpenAI GPT 기반 맥락적 대화 및 루틴 처리 |
+| 감정 분석 | RAVDESS 데이터셋 기반 음성 감정 분석 |
+| 음악 추천 | 감정 기반 맞춤형 음악 추천 |
+| 활동 추천 | 감정에 따른 활동 및 메시지 추천 |
 | 날씨 정보 | OpenWeatherMap API 기반 실시간 날씨 표시 |
 | 일정 관리 | Google Calendar 연동으로 일정 표시 |
 | 뉴스 | RSS 피드 기반 최신 뉴스 제공 |
@@ -36,6 +39,7 @@ mirror-app/
 │  ├─ calendar.js
 │  ├─ config.js
 │  ├─ conversation.js
+│  ├─ emotion-analysis.js
 │  ├─ frontend/
 │  │  ├─ client-captions.js
 │  │  ├─ client-chat.js
@@ -51,6 +55,8 @@ mirror-app/
 │  ├─ tts.js
 │  ├─ weather.js
 │  └─ websocket.js
+├─ models/
+│  └─ Actor_01-24/ (RAVDESS 감정 음성 데이터셋)
 ├─ public/
 │  └─ index.html
 ├─ app.js.backup
@@ -94,6 +100,7 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 3. 의존성 설치
    ```bash
    npm install
+   pip install -r requirements.txt
    ```
 4. 서버 실행
    ```bash

@@ -9,6 +9,7 @@ const {
   LISTENING_BROADCAST_INTERVAL_MS
 } = require('./config');
 const { log } = require('./logging');
+const { EmotionAnalysisSystem } = require('./emotion-analysis');
 
 const speechClient = new SpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
 
@@ -88,6 +89,11 @@ let lastTranscriptAt = 0;
 let commandBuffer = '';
 let listeningWindowInterval = null;
 
+// 감정 분석 시스템
+let emotionAnalysisSystem = null;
+let currentAudioBuffer = null;
+let emotionAnalysisInterval = null;
+
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
     clearInterval(listeningWindowInterval);
@@ -96,6 +102,57 @@ const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (notifyOff && broadcast) {
     broadcast({ type: 'status', status: 'listening_off' });
   }
+};
+
+// 감정 분석 시작
+const startEmotionAnalysis = (broadcast) => {
+  if (emotionAnalysisInterval) {
+    clearInterval(emotionAnalysisInterval);
+  }
+  
+  // 5초마다 감정 분석 수행
+  emotionAnalysisInterval = setInterval(async () => {
+    if (currentAudioBuffer && currentAudioBuffer.length > 16000) { // 최소 1초 분량
+      try {
+        const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromStream(currentAudioBuffer);
+        
+        if (emotionResult.emotion !== 'unknown' && emotionResult.confidence > 0.5) {
+          log.info('감정 분석 결과:', emotionResult);
+          
+          // 감정 기반 응답 생성
+          const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
+            emotionResult.emotion, 
+            emotionResult.confidence
+          );
+          
+          // 브로드캐스트로 감정 정보 전송
+          if (broadcast) {
+            broadcast({ 
+              type: 'emotion_analysis', 
+              emotion: emotionResult.emotion,
+              confidence: emotionResult.confidence,
+              response: emotionResponse.response,
+              recommendations: emotionResponse.recommendations
+            });
+          }
+        }
+        
+        // 버퍼 초기화
+        currentAudioBuffer = null;
+      } catch (error) {
+        log.error('감정 분석 실패:', error.message);
+      }
+    }
+  }, 5000); // 5초마다 분석
+};
+
+// 감정 분석 중지
+const stopEmotionAnalysis = () => {
+  if (emotionAnalysisInterval) {
+    clearInterval(emotionAnalysisInterval);
+    emotionAnalysisInterval = null;
+  }
+  currentAudioBuffer = null;
 };
 
 const startListeningWindowTicker = (broadcast) => {
@@ -126,6 +183,11 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
   hotwordMode = 'hotword';
   commandBuffer = '';
   lastTranscriptAt = Date.now();
+
+  // 감정 분석 시스템 초기화
+  if (!emotionAnalysisSystem) {
+    emotionAnalysisSystem = new EmotionAnalysisSystem();
+  }
 
   const request = {
     config: {
@@ -229,8 +291,24 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
     recordProgram: 'arecord',
     silence: '1.0',
   });
-  micInstance.stream().on('error', (err) => log.error('마이크 오류:', err)).pipe(recognizeStream);
+  
+  // 마이크 스트림에서 오디오 데이터를 감정 분석을 위해 버퍼에 저장
+  micInstance.stream()
+    .on('error', (err) => log.error('마이크 오류:', err))
+    .on('data', (chunk) => {
+      // 오디오 데이터를 감정 분석을 위해 버퍼에 저장
+      if (currentAudioBuffer) {
+        currentAudioBuffer = Buffer.concat([currentAudioBuffer, chunk]);
+      } else {
+        currentAudioBuffer = chunk;
+      }
+    })
+    .pipe(recognizeStream);
+    
   log.info('상시 듣기 시작(핫워드: "미러야")');
+  
+  // 감정 분석 시작
+  startEmotionAnalysis(broadcast);
   
   // 상시 리스닝 시작 상태 브로드캐스트
   if (broadcast) {
@@ -242,6 +320,10 @@ const stopContinuousHotwordListener = (broadcast) => {
   if (!isMicListening) return;
   try { if (micInstance) micInstance.stop(); } catch {}
   try { if (recognizeStream) recognizeStream.destroy(); } catch {}
+  
+  // 감정 분석 중지
+  stopEmotionAnalysis();
+  
   micInstance = null;
   recognizeStream = null;
   isMicListening = false;
@@ -262,5 +344,7 @@ module.exports = {
   stopContinuousHotwordListener,
   isMicListening,
   startListeningWindowTicker,
-  stopListeningWindowTicker
+  stopListeningWindowTicker,
+  startEmotionAnalysis,
+  stopEmotionAnalysis
 };
