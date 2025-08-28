@@ -459,7 +459,7 @@ if (ALWAYS_LISTEN) {
   startContinuousHotwordListener(
     (text) => processRecognizedCommand(text, dependencies),
     broadcast,
-    () => isTTSActive
+    isTTSActive
   );
 }
 

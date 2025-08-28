@@ -354,76 +354,9 @@ const processRecognizedCommand = async (text, dependencies) => {
   let reply = '';
   
   try {
-    const userIntent = analyzeUserIntent(trimmed);
-    const contextSummary = conversationContext.getContextSummary(userId);
-    
-    conversationContext.addMessage(userId, 'user', trimmed, userIntent);
-    
-    // 루틴 진행 중인지 확인
-    const currentRoutine = personalizedRoutine.getRoutineSummary(userId);
-    if (currentRoutine && currentRoutine.remainingSteps.length > 0) {
-      const currentStep = personalizedRoutine.getNextStep(userId);
-      if (currentStep) {
-        reply = await handleRoutineStep(userId, currentStep.id, trimmed, personalizedRoutine);
-        if (reply) {
-          conversationContext.addMessage(userId, 'assistant', reply);
-          return reply;
-        }
-      }
-    }
-    
-    // 루틴 시작 의도 처리
-    if (userIntent.type === 'routine_start') {
-      const routine = personalizedRoutine.startRoutine(userId, userIntent.routine);
-      if (routine) {
-        const firstStep = routine.steps[0];
-        reply = `네, ${routine.name}을 시작하겠습니다. ${firstStep.question}`;
-        conversationContext.setRoutineContext(userId, routine);
-        conversationContext.addMessage(userId, 'assistant', reply);
-        return reply;
-      }
-    }
-    
-    // 날씨 관련 후속 질문 처리
-    if (userIntent.type === 'weather_umbrella') {
-      try {
-        const weatherData = await fetchWeatherData();
-        const isRaining = /비|눈|소나기/.test(weatherData.weather?.[0]?.description || '');
-        
-        if (isRaining) {
-          reply = '네, 오후에 소나기 예보가 있습니다. 우산을 챙기시는 것이 좋겠습니다.';
-        } else {
-          reply = '현재는 비 소식이 없습니다. 하지만 날씨는 변할 수 있으니 확인해보시는 것이 좋겠습니다.';
-        }
-        
-        conversationContext.setCurrentTopic(userId, 'weather');
-        conversationContext.addMessage(userId, 'assistant', reply);
-        return reply;
-      } catch (error) {
-        log.warn('날씨 후속 질문 처리 실패:', error.message);
-      }
-    }
-    
-    // 맥락적 응답 시도
-    if (contextSummary.recentMessages.length > 0) {
-      const contextualReply = await generateContextualResponse(trimmed, userIntent, contextSummary, openai);
-      if (contextualReply) {
-        reply = contextualReply;
-        conversationContext.addMessage(userId, 'assistant', reply);
-        return reply;
-      }
-    }
-    
-    // 날짜 정보 파싱
-    const dateInfo = parseRelativeDate(trimmed);
-    
-    // 맥락 기반 후속 질문 처리
-    const currentTopic = contextSummary.currentTopic;
-    const isFollowUpQuestion = await checkIfFollowUpQuestion(trimmed, currentTopic, userIntent);
-    
-    // 우선순위 기반 명령 처리
-    // 1. 뉴스 관련 질문 (직접 언급하거나 후속 질문)
-    if (/뉴스/.test(trimmed) || (isFollowUpQuestion && currentTopic === 'news')) {
+    // 우선순위 기반 명령 처리 (backup 파일의 간단하고 효과적인 방식)
+    // 1. 뉴스 관련 질문
+    if (/뉴스/.test(trimmed)) {
       try {
         const newsRes = await processNewsQuery(trimmed);
         reply = newsRes.response || '뉴스 정보를 불러올 수 없습니다.';
@@ -432,8 +365,8 @@ const processRecognizedCommand = async (text, dependencies) => {
       }
       conversationContext.setCurrentTopic(userId, 'news');
     }
-    // 2. 날씨 관련 질문 (직접 언급하거나 후속 질문)
-    else if (/날씨|온도|기온|춥|덥|비|눈/.test(trimmed) || (isFollowUpQuestion && currentTopic === 'weather')) {
+    // 2. 날씨 관련 질문
+    else if (/날씨|온도|기온|춥|덥|비|눈/.test(trimmed)) {
       try {
         const weatherData = await fetchWeatherData();
         if (/(춥|덥|기온|온도)/.test(trimmed)) {
@@ -460,19 +393,12 @@ const processRecognizedCommand = async (text, dependencies) => {
       reply = `오늘은 ${formatKSTDate()}입니다.`;
       if (/(요일)/.test(trimmed)) reply += ` ${weekday}입니다.`;
     }
-    // 5. 맥락 기반 응답 시도 (이전 대화와 연결)
+    // 5. 일반 대화는 GPT에 위임
     else {
-      // 먼저 맥락적 응답 시도
-      const contextualReply = await generateContextualResponse(trimmed, userIntent, contextSummary, openai);
-      if (contextualReply) {
-        reply = contextualReply;
-      } else {
-        // 맥락이 없으면 일반 GPT 응답
-        reply = await answerWithGPT(trimmed, contextSummary, openai);
-      }
+      reply = await answerWithGPT(trimmed, {}, openai);
     }
     
-    conversationContext.addMessage(userId, 'assistant', reply);
+    // 개인화 시스템에 상호작용 기록
     personalizationSystem.recordInteraction(trimmed, reply);
     
     if (broadcast) {
@@ -484,7 +410,6 @@ const processRecognizedCommand = async (text, dependencies) => {
     log.error('명령 처리 오류:', e.message);
     reply = '요청을 처리하는 중 문제가 발생했습니다.';
     
-    conversationContext.addMessage(userId, 'assistant', reply);
     personalizationSystem.recordInteraction(trimmed, reply);
     
     if (broadcast) {
