@@ -2,7 +2,7 @@ const axios = require('axios');
 const { PORT } = require('./config');
 const { log } = require('./logging');
 const { fetchWeatherData } = require('./weather');
-const { fetchTodayEvents, formatKSTTimeFromISO } = require('./calendar');
+const { fetchTodayEvents, formatKSTTimeFromISO, fetchEventsForDay } = require('./calendar');
 
 // 대화 컨텍스트 관리 시스템
 class ConversationContext {
@@ -378,103 +378,121 @@ const processRecognizedCommand = async (text, dependencies) => {
     else if (/(몇\s*시|현재\s*시간|지금\s*시간|time)/i.test(trimmed)) {
       reply = `현재 시각은 ${formatKSTTime()}입니다.`;
     }
-    // 4. 날짜/요일 질문
-    else if (/(며칠|날짜|date|무슨\s*요일|요일)/i.test(trimmed)) {
-      const now = new Date();
-      const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][now.getDay()];
-      reply = `오늘은 ${formatKSTDate()}입니다.`;
-      if (/(요일)/.test(trimmed)) reply += ` ${weekday}입니다.`;
-    }
-    // 5. 일정 관련 질문
-    else if (/(일정|스케줄|캘린더|미팅|회의|약속)/.test(trimmed)) {
+    // 4. 날짜/요일/일정 관련 질문 (상대적 날짜 처리 포함)
+    else if (isPureDateQuery(trimmed)) {
       try {
-        const events = await fetchTodayEvents();
-        if (events && events.length > 0) {
-          const now = new Date();
-          const currentTime = now.getTime();
-          
-          // 모든 일정을 시간순으로 정렬
-          const sortedEvents = events.sort((a, b) => {
-            const aTime = a.isAllDay ? 0 : new Date(a.start).getTime();
-            const bTime = b.isAllDay ? 0 : new Date(b.start).getTime();
-            return aTime - bTime;
-          });
-          
-          // 지난 일정과 남은 일정 분류
-          const pastEvents = [];
-          const upcomingEvents = [];
-          const allDayEvents = [];
-          
-          sortedEvents.forEach(ev => {
-            if (ev.isAllDay) {
-              allDayEvents.push(ev);
-            } else {
-              const endTime = ev.end ? new Date(ev.end).getTime() : new Date(ev.start).getTime() + (60 * 60 * 1000);
-              if (endTime <= currentTime) {
-                pastEvents.push(ev);
+        // 상대적 날짜 파싱
+        const dateInfo = parseRelativeDate(trimmed);
+        const lowerQuery = trimmed.toLowerCase();
+        
+        // 요일 질문인 경우
+        if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
+          const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
+          reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`;
+        }
+        // 시간 질문인 경우
+        else if (/(몇\s*시|시간|time)/.test(lowerQuery)) {
+          const hours = dateInfo.date.getHours();
+          const minutes = dateInfo.date.getMinutes();
+          const isAM = hours < 12;
+          const hourDisplay = hours % 12 === 0 ? 12 : hours % 12;
+          const timeStr = `오${isAM ? '전' : '후'} ${hourDisplay}:${minutes.toString().padStart(2, '0')}`;
+          reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${timeStr}입니다.`;
+        }
+        // 일정 질문인 경우
+        else if (/(일정|스케줄|캘린더|미팅|회의|약속|알려\s*줘)/.test(lowerQuery)) {
+          const events = await fetchEventsForDay(dateInfo.date);
+          if (events && events.length > 0) {
+            const now = new Date();
+            const currentTime = now.getTime();
+            
+            // 모든 일정을 시간순으로 정렬
+            const sortedEvents = events.sort((a, b) => {
+              const aTime = a.isAllDay ? 0 : new Date(a.start).getTime();
+              const bTime = b.isAllDay ? 0 : new Date(b.start).getTime();
+              return aTime - bTime;
+            });
+            
+            // 지난 일정과 남은 일정 분류
+            const pastEvents = [];
+            const upcomingEvents = [];
+            const allDayEvents = [];
+            
+            sortedEvents.forEach(ev => {
+              if (ev.isAllDay) {
+                allDayEvents.push(ev);
               } else {
-                upcomingEvents.push(ev);
+                const endTime = ev.end ? new Date(ev.end).getTime() : new Date(ev.start).getTime() + (60 * 60 * 1000);
+                if (endTime <= currentTime) {
+                  pastEvents.push(ev);
+                } else {
+                  upcomingEvents.push(ev);
+                }
+              }
+            });
+            
+            // 자연스러운 응답 구성
+            let responseParts = [];
+            
+            // 하루종일 일정이 있으면 먼저 언급
+            if (allDayEvents.length > 0) {
+              const allDayDescriptions = allDayEvents.map(ev => ev.summary);
+              if (allDayDescriptions.length === 1) {
+                responseParts.push(`하루종일 ${allDayDescriptions[0]} 일정이 있습니다`);
+              } else {
+                responseParts.push(`하루종일 ${allDayDescriptions.join(', ')} 일정이 있습니다`);
               }
             }
-          });
-          
-          // 응답 구성
-          let responseParts = [];
-          
-          // 하루종일 일정이 있으면 먼저 언급
-          if (allDayEvents.length > 0) {
-            const allDayDescriptions = allDayEvents.map(ev => ev.summary);
-            if (allDayDescriptions.length === 1) {
-              responseParts.push(`하루종일 ${allDayDescriptions[0]} 일정이 있습니다`);
-            } else {
-              responseParts.push(`하루종일 ${allDayDescriptions.join(', ')} 일정이 있습니다`);
+            
+            // 지난 일정이 있으면 언급
+            if (pastEvents.length > 0) {
+              const pastDescriptions = pastEvents.map(ev => {
+                const time = formatKSTTimeFromISO(ev.start);
+                return `${time} ${ev.summary}`;
+              });
+              if (pastDescriptions.length === 1) {
+                responseParts.push(`${pastDescriptions[0]}는 이미 지났습니다`);
+              } else {
+                responseParts.push(`${pastDescriptions.join(', ')}는 이미 지났습니다`);
+              }
             }
-          }
-          
-          // 지난 일정이 있으면 언급
-          if (pastEvents.length > 0) {
-            const pastDescriptions = pastEvents.map(ev => {
-              const time = formatKSTTimeFromISO(ev.start);
-              return `${time} ${ev.summary}`;
-            });
-            if (pastDescriptions.length === 1) {
-              responseParts.push(`${pastDescriptions[0]}는 이미 지났습니다`);
-            } else {
-              responseParts.push(`${pastDescriptions.join(', ')}는 이미 지났습니다`);
+            
+            // 남은 일정이 있으면 언급
+            if (upcomingEvents.length > 0) {
+              const upcomingDescriptions = upcomingEvents.map(ev => {
+                const time = formatKSTTimeFromISO(ev.start);
+                return `${time} ${ev.summary}`;
+              });
+              if (upcomingDescriptions.length === 1) {
+                responseParts.push(`앞으로 ${upcomingDescriptions[0]}가 남아있습니다`);
+              } else {
+                responseParts.push(`앞으로 ${upcomingDescriptions.join(', ')}가 남아있습니다`);
+              }
             }
-          }
-          
-          // 남은 일정이 있으면 언급
-          if (upcomingEvents.length > 0) {
-            const upcomingDescriptions = upcomingEvents.map(ev => {
-              const time = formatKSTTimeFromISO(ev.start);
-              return `${time} ${ev.summary}`;
-            });
-            if (upcomingDescriptions.length === 1) {
-              responseParts.push(`앞으로 ${upcomingDescriptions[0]}가 남아있습니다`);
+            
+            // 응답 조합 (자연스러운 문장 구성)
+            if (responseParts.length === 1) {
+              reply = responseParts[0] + '.';
+            } else if (responseParts.length === 2) {
+              reply = responseParts[0] + '이고, ' + responseParts[1] + '.';
             } else {
-              responseParts.push(`앞으로 ${upcomingDescriptions.join(', ')}가 남아있습니다`);
+              reply = responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.';
             }
-          }
-          
-          // 응답 조합
-          if (responseParts.length === 1) {
-            reply = responseParts[0] + '.';
-          } else if (responseParts.length === 2) {
-            reply = responseParts[0] + '이고, ' + responseParts[1] + '.';
+            
           } else {
-            reply = responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.';
+            reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]} 등록된 일정이 없습니다.`;
           }
-          
-        } else {
-          reply = '오늘 등록된 일정이 없습니다.';
+        }
+        // 일반 날짜 질문인 경우
+        else {
+          reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
         }
       } catch (error) {
-        log.error('일정 조회 실패:', error.message);
-        reply = '일정을 불러오는 데 실패했습니다.';
+        log.error('날짜/일정 처리 실패:', error.message);
+        reply = '요청을 처리하는 데 실패했습니다.';
       }
     }
-    // 6. 일반 대화는 GPT에 위임
+    // 5. 일반 대화는 GPT에 위임
     else {
       reply = await answerWithGPT(trimmed, {}, openai);
     }
@@ -528,6 +546,243 @@ const sanitizeAssistantText = (text) => {
 };
 
 const getWeekdayShortKorean = (dateLike) => ['일','월','화','수','목','금','토'][new Date(dateLike).getDay()];
+
+// ========== 상대적 날짜 처리 함수들 ==========
+const getKSTNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+
+const parseRelativeDate = (text) => {
+  const lowerText = text.toLowerCase().trim();
+  
+  // 상대적 날짜 패턴 매칭
+  const patterns = {
+    // 오늘
+    today: /(오늘|금일|오늘날)/,
+    
+    // 어제/내일/모레
+    yesterday: /(어제|작일)/,
+    tomorrow: /(내일|다음날)/,
+    dayAfterTomorrow: /(모레|글피)/,
+    
+    // 요일 기반
+    nextMonday: /(다음\s*월요일|월요일)/,
+    nextTuesday: /(다음\s*화요일|화요일)/,
+    nextWednesday: /(다음\s*수요일|수요일)/,
+    nextThursday: /(다음\s*목요일|목요일)/,
+    nextFriday: /(다음\s*금요일|금요일)/,
+    nextSaturday: /(다음\s*토요일|토요일)/,
+    nextSunday: /(다음\s*일요일|일요일)/,
+    
+    // 주 단위
+    nextWeek: /(다음\s*주|다음주)/,
+    thisWeek: /(이번\s*주|이번주|금주)/,
+    
+    // 월 단위
+    nextMonth: /(다음\s*달|다음달|내달)/,
+    thisMonth: /(이번\s*달|이번달|금월)/,
+    
+    // 시간 단위
+    hoursLater: /(\d{1,2})\s*시간\s*(뒤|후|후에)/,
+    minutesLater: /(\d{1,2})\s*분\s*(뒤|후|후에)/,
+    
+    // 특정 날짜
+    specificDate: /(\d{1,2})월\s*(\d{1,2})일/,
+    specificDay: /(\d{1,2})일/
+  };
+  
+  const now = getKSTNow();
+  const result = {
+    type: 'unknown',
+    date: null,
+    text: text,
+    original: text
+  };
+  
+  // 오늘
+  if (patterns.today.test(lowerText)) {
+    result.type = 'today';
+    result.date = new Date(now);
+    return result;
+  }
+  
+  // 어제
+  if (patterns.yesterday.test(lowerText)) {
+    result.type = 'yesterday';
+    result.date = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    return result;
+  }
+  
+  // 내일
+  if (patterns.tomorrow.test(lowerText)) {
+    result.type = 'tomorrow';
+    result.date = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    return result;
+  }
+  
+  // 모레
+  if (patterns.dayAfterTomorrow.test(lowerText)) {
+    result.type = 'dayAfterTomorrow';
+    result.date = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    return result;
+  }
+  
+  // 시간 단위
+  const hoursMatch = lowerText.match(patterns.hoursLater);
+  const minutesMatch = lowerText.match(patterns.minutesLater);
+  
+  if (hoursMatch || minutesMatch) {
+    let totalMs = 0;
+    let timeDescription = '';
+    
+    if (hoursMatch) {
+      const hours = parseInt(hoursMatch[1], 10);
+      totalMs += hours * 60 * 60 * 1000;
+      timeDescription += `${hours}시간`;
+    }
+    
+    if (minutesMatch) {
+      const minutes = parseInt(minutesMatch[1], 10);
+      totalMs += minutes * 60 * 1000;
+      timeDescription += `${minutes}분`;
+    }
+    
+    result.type = 'timeLater';
+    result.date = new Date(now.getTime() + totalMs);
+    result.timeDescription = timeDescription;
+    return result;
+  }
+  
+  // 요일 기반
+  const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const weekdayPatterns = [
+    patterns.nextSunday, patterns.nextMonday, patterns.nextTuesday, 
+    patterns.nextWednesday, patterns.nextThursday, patterns.nextFriday, patterns.nextSaturday
+  ];
+  
+  for (let i = 0; i < weekdayPatterns.length; i++) {
+    if (weekdayPatterns[i].test(lowerText)) {
+      const targetDay = i;
+      const currentDay = now.getDay();
+      let daysToAdd = targetDay - currentDay;
+      
+      // 다음 주로 설정
+      if (daysToAdd <= 0) {
+        daysToAdd += 7;
+      }
+      
+      result.type = 'nextWeekday';
+      result.date = new Date(now.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+      result.weekday = weekdays[i];
+      return result;
+    }
+  }
+  
+  // 주 단위
+  if (patterns.nextWeek.test(lowerText)) {
+    result.type = 'nextWeek';
+    const nextMonday = new Date(now.getTime());
+    const daysUntilMonday = (8 - now.getDay()) % 7;
+    nextMonday.setDate(now.getDate() + daysUntilMonday);
+    nextMonday.setHours(0, 0, 0, 0);
+    result.date = nextMonday;
+    return result;
+  }
+  
+  if (patterns.thisWeek.test(lowerText)) {
+    result.type = 'thisWeek';
+    const thisMonday = new Date(now.getTime());
+    const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    thisMonday.setDate(now.getDate() - daysSinceMonday);
+    thisMonday.setHours(0, 0, 0, 0);
+    result.date = thisMonday;
+    return result;
+  }
+  
+  // 특정 날짜 (이번 달)
+  const specificDateMatch = lowerText.match(patterns.specificDate);
+  if (specificDateMatch) {
+    const month = parseInt(specificDateMatch[1], 10) - 1; // 0-based
+    const day = parseInt(specificDateMatch[2], 10);
+    const targetDate = new Date(now.getFullYear(), month, day);
+    
+    // 과거 날짜면 다음 해로 설정
+    if (targetDate < now) {
+      targetDate.setFullYear(targetDate.getFullYear() + 1);
+    }
+    
+    result.type = 'specificDate';
+    result.date = targetDate;
+    return result;
+  }
+  
+  // 특정 일 (이번 달)
+  const specificDayMatch = lowerText.match(patterns.specificDay);
+  if (specificDayMatch) {
+    const day = parseInt(specificDayMatch[1], 10);
+    const targetDate = new Date(now.getFullYear(), now.getMonth(), day);
+    
+    // 과거 날짜면 다음 달로 설정
+    if (targetDate < now) {
+      targetDate.setMonth(targetDate.getMonth() + 1);
+    }
+    
+    result.type = 'specificDay';
+    result.date = targetDate;
+    return result;
+  }
+  
+  return result;
+};
+
+// 날짜 정보를 한국어로 표현
+const getKoreanDateInfo = (dateInfo) => {
+  if (!dateInfo || !dateInfo.date) return '';
+  
+  const date = dateInfo.date;
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][date.getDay()];
+  
+  const now = getKSTNow();
+  const isToday = date.toDateString() === now.toDateString();
+  const isTomorrow = date.toDateString() === new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString();
+  const isYesterday = date.toDateString() === new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString();
+  
+  if (isToday) {
+    return `오늘 (${weekday})`;
+  } else if (isTomorrow) {
+    return `내일 (${weekday})`;
+  } else if (isYesterday) {
+    return `어제 (${weekday})`;
+  } else {
+    return `${year}년 ${month}월 ${day}일 (${weekday})`;
+  }
+};
+
+// 순수한 날짜/시간 질문인지 판별
+const isPureDateQuery = (query) => {
+  const lowerQuery = query.toLowerCase();
+  
+  // 다른 주제와 혼재된 질문 제외
+  const excludeKeywords = [
+    '뉴스', '날씨', '음악', '노래', '영화', '드라마', '게임', '쇼핑', '맛집', '레스토랑',
+    '운동', '헬스', '요리', '레시피', '여행', '호텔', '항공', '버스', '지하철', '택시',
+    '은행', '주식', '투자', '쇼핑몰', '마트', '편의점', '병원', '약국', '학교', '학원'
+  ];
+  
+  // 제외 키워드가 포함된 경우 순수한 날짜 질문이 아님
+  if (excludeKeywords.some(keyword => lowerQuery.includes(keyword))) {
+    return false;
+  }
+  
+  // 날짜/시간 관련 키워드가 명확히 포함된 경우만
+  const dateKeywords = [
+    '일정', '스케줄', '캘린더', '약속', '행사', '시간', '몇 시', '날짜', '며칠', '요일',
+    '내일', '모레', '오늘', '어제', '다음 주', '이번 주', '시간 후', '분 후'
+  ];
+  
+  return dateKeywords.some(keyword => lowerQuery.includes(keyword));
+};
 
 // GPT 기반 일반 대화 (맥락 포함)
 const answerWithGPT = async (userText, extraContext = {}, openai) => {
@@ -592,5 +847,9 @@ module.exports = {
   answerWithGPT,
   composeWithOpenAI,
   sanitizeAssistantText,
-  getWeekdayShortKorean
+  getWeekdayShortKorean,
+  parseRelativeDate,
+  getKoreanDateInfo,
+  isPureDateQuery,
+  getKSTNow
 };
