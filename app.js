@@ -397,6 +397,20 @@ app.get('/api/personalized-message', (req, res) => {
   }
 });
 
+// 메시지 변경 API
+app.post('/api/personalized-message/change', async (req, res) => {
+  try {
+    const newMessage = await personalizationSystem.changeMessage(broadcast, environmentalAwareness);
+    res.json({ 
+      message: newMessage,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    log.error('메시지 변경 API 오류:', error);
+    res.status(500).json({ error: '메시지 변경에 실패했습니다.' });
+  }
+});
+
 // 헬스체크 API
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();

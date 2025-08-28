@@ -390,11 +390,82 @@ const processRecognizedCommand = async (text, dependencies) => {
       try {
         const events = await fetchTodayEvents();
         if (events && events.length > 0) {
-          const eventList = events.slice(0, 3).map(ev => {
-            const time = ev.start ? formatKSTTimeFromISO(ev.start) : '종일';
-            return `${time} ${ev.summary}`;
-          }).join(', ');
-          reply = `오늘 일정: ${eventList}`;
+          const now = new Date();
+          const currentTime = now.getTime();
+          
+          // 모든 일정을 시간순으로 정렬
+          const sortedEvents = events.sort((a, b) => {
+            const aTime = a.isAllDay ? 0 : new Date(a.start).getTime();
+            const bTime = b.isAllDay ? 0 : new Date(b.start).getTime();
+            return aTime - bTime;
+          });
+          
+          // 지난 일정과 남은 일정 분류
+          const pastEvents = [];
+          const upcomingEvents = [];
+          const allDayEvents = [];
+          
+          sortedEvents.forEach(ev => {
+            if (ev.isAllDay) {
+              allDayEvents.push(ev);
+            } else {
+              const endTime = ev.end ? new Date(ev.end).getTime() : new Date(ev.start).getTime() + (60 * 60 * 1000);
+              if (endTime <= currentTime) {
+                pastEvents.push(ev);
+              } else {
+                upcomingEvents.push(ev);
+              }
+            }
+          });
+          
+          // 응답 구성
+          let responseParts = [];
+          
+          // 하루종일 일정이 있으면 먼저 언급
+          if (allDayEvents.length > 0) {
+            const allDayDescriptions = allDayEvents.map(ev => ev.summary);
+            if (allDayDescriptions.length === 1) {
+              responseParts.push(`하루종일 ${allDayDescriptions[0]} 일정이 있습니다`);
+            } else {
+              responseParts.push(`하루종일 ${allDayDescriptions.join(', ')} 일정이 있습니다`);
+            }
+          }
+          
+          // 지난 일정이 있으면 언급
+          if (pastEvents.length > 0) {
+            const pastDescriptions = pastEvents.map(ev => {
+              const time = formatKSTTimeFromISO(ev.start);
+              return `${time} ${ev.summary}`;
+            });
+            if (pastDescriptions.length === 1) {
+              responseParts.push(`${pastDescriptions[0]}는 이미 지났습니다`);
+            } else {
+              responseParts.push(`${pastDescriptions.join(', ')}는 이미 지났습니다`);
+            }
+          }
+          
+          // 남은 일정이 있으면 언급
+          if (upcomingEvents.length > 0) {
+            const upcomingDescriptions = upcomingEvents.map(ev => {
+              const time = formatKSTTimeFromISO(ev.start);
+              return `${time} ${ev.summary}`;
+            });
+            if (upcomingDescriptions.length === 1) {
+              responseParts.push(`앞으로 ${upcomingDescriptions[0]}가 남아있습니다`);
+            } else {
+              responseParts.push(`앞으로 ${upcomingDescriptions.join(', ')}가 남아있습니다`);
+            }
+          }
+          
+          // 응답 조합
+          if (responseParts.length === 1) {
+            reply = responseParts[0] + '.';
+          } else if (responseParts.length === 2) {
+            reply = responseParts[0] + '이고, ' + responseParts[1] + '.';
+          } else {
+            reply = responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.';
+          }
+          
         } else {
           reply = '오늘 등록된 일정이 없습니다.';
         }

@@ -250,20 +250,70 @@ class PersonalizationSystem {
       };
     }
 
-    // 오늘 일정 개수에 따른 메시지
-    const todayEvents = events.filter(event => {
-      const eventDate = new Date(event.time);
-      const today = new Date();
-      return eventDate.getDate() === today.getDate() && 
-             eventDate.getMonth() === today.getMonth() && 
-             eventDate.getFullYear() === today.getFullYear();
+    // 하루종일 일정 확인
+    const allDayEvents = events.filter(event => event.isAllDay);
+    if (allDayEvents.length > 0) {
+      if (allDayEvents.length === 1) {
+        return {
+          message: `오늘 하루종일 "${allDayEvents[0].summary}" 일정이 있습니다`,
+          type: 'schedule'
+        };
+      } else {
+        const eventNames = allDayEvents.map(ev => ev.summary).join(', ');
+        return {
+          message: `오늘 하루종일 ${eventNames} 일정이 있습니다`,
+          type: 'schedule'
+        };
+      }
+    }
+
+    // 지난 일정 확인 (최근에 끝난 일정이 있으면 언급)
+    const recentPastEvents = events.filter(event => {
+      if (event.isAllDay) return false;
+      const endTime = event.end ? new Date(event.end).getTime() : new Date(event.time).getTime() + (60 * 60 * 1000);
+      const timeSinceEnd = currentTime - endTime;
+      return endTime <= currentTime && timeSinceEnd <= 2 * 60 * 60 * 1000; // 2시간 이내에 끝난 일정
     });
 
-    if (todayEvents.length > 0) {
+    if (recentPastEvents.length > 0) {
+      const mostRecent = recentPastEvents[0];
+      const timeSinceEnd = currentTime - (mostRecent.end ? new Date(mostRecent.end).getTime() : new Date(mostRecent.time).getTime() + (60 * 60 * 1000));
+      const minutesAgo = Math.round(timeSinceEnd / (1000 * 60));
       return {
-        message: `오늘 ${todayEvents.length}개의 일정이 있습니다`,
+        message: `${minutesAgo}분 전에 "${mostRecent.summary}"가 끝났습니다`,
         type: 'schedule'
       };
+    }
+
+    // 오늘 남은 일정 개수에 따른 메시지
+    const remainingEvents = events.filter(event => {
+      if (event.isAllDay) return true; // 하루종일 일정은 항상 포함
+      const endTime = event.end ? new Date(event.end).getTime() : new Date(event.time).getTime() + (60 * 60 * 1000);
+      return endTime > currentTime; // 아직 끝나지 않은 일정만
+    });
+
+    if (remainingEvents.length > 0) {
+      if (remainingEvents.length === 1) {
+        const event = remainingEvents[0];
+        if (event.isAllDay) {
+          return {
+            message: `오늘 하루종일 "${event.summary}" 일정이 있습니다`,
+            type: 'schedule'
+          };
+        } else {
+          const time = new Date(event.time);
+          const timeStr = `${time.getHours()}:${time.getMinutes().toString().padStart(2, '0')}`;
+          return {
+            message: `오늘 ${timeStr}에 "${event.summary}" 일정이 있습니다`,
+            type: 'schedule'
+          };
+        }
+      } else {
+        return {
+          message: `오늘 ${remainingEvents.length}개의 일정이 남아있습니다`,
+          type: 'schedule'
+        };
+      }
     }
 
     return null;
@@ -378,6 +428,26 @@ class PersonalizationSystem {
         });
       }
     }, 1000); // 1초 지연
+  }
+
+  // 메시지 변경 요청 처리
+  async changeMessage(broadcast, envAwareness = null) {
+    // 메시지 타입을 리셋하여 새로운 메시지 생성 유도
+    this.lastMessageType = '';
+    const newMessage = await this.generatePersonalizedMessage(broadcast, envAwareness);
+    if (newMessage && newMessage !== this.currentMessage) {
+      this.currentMessage = newMessage;
+      // WebSocket을 통해 클라이언트에 전송
+      if (broadcast) {
+        broadcast({ 
+          type: 'personalized_message', 
+          message: newMessage,
+          timestamp: Date.now()
+        });
+      }
+      return newMessage;
+    }
+    return this.currentMessage;
   }
 
   // 현재 메시지 가져오기

@@ -201,12 +201,32 @@ const fetchEventsForDay = async (targetDate = null) => {
     const start = ev.start?.dateTime || ev.start?.date;
     const end = ev.end?.dateTime || ev.end?.date;
     const isAllDay = !!(ev.start?.date && !ev.start?.dateTime);
+    
+    // 하루종일 일정 처리 (오전 12:00 ~ 오전 12:00)
+    let processedStart = start;
+    let processedEnd = end;
+    let processedIsAllDay = isAllDay;
+    
+    if (!isAllDay && start && end) {
+      const startTime = new Date(start);
+      const endTime = new Date(end);
+      const startHour = startTime.getHours();
+      const endHour = endTime.getHours();
+      
+      // 오전 12:00 ~ 오전 12:00 패턴 감지
+      if (startHour === 0 && endHour === 0 && 
+          startTime.getMinutes() === 0 && endTime.getMinutes() === 0 &&
+          startTime.getDate() === endTime.getDate()) {
+        processedIsAllDay = true;
+      }
+    }
+    
     return {
       id: ev.id,
       summary: ev.summary || '(제목 없음)',
-      start,
-      end,
-      isAllDay,
+      start: processedStart,
+      end: processedEnd,
+      isAllDay: processedIsAllDay,
       hangoutLink: ev.hangoutLink,
       location: ev.location,
       htmlLink: ev.htmlLink,
@@ -227,8 +247,14 @@ const formatKoreanTime = (isoLike) => {
   return `오${isAM ? '전' : '후'} ${String(hh)}:${String(m).padStart(2, '0')}`;
 };
 
-const formatKSTTimeFromISO = (isoLike) => {
+const formatKSTTimeFromISO = (isoLike, isAllDay = false) => {
   if (!isoLike) return '';
+  
+  // 하루종일 일정인 경우
+  if (isAllDay) {
+    return '하루종일';
+  }
+  
   const d = new Date(new Date(isoLike).toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   const h = d.getHours();
   const m = d.getMinutes();

@@ -30,15 +30,28 @@
     #dateTime .time { font-size: 84px; font-weight: 700; line-height: 1; }
     #dateTime .date { font-size: 22px; color: var(--muted); margin-top: 6px; }
     #advice { 
-      margin-top: 14px; 
-      font-size: 18px; 
-      color: var(--success); 
-      font-weight: 500;
-      min-height: 1.2em;
-      transition: opacity 0.3s ease;
-    }
-    #advice:empty { opacity: 0; }
-    #advice:not(:empty) { opacity: 1; }
+  margin-top: 14px; 
+  font-size: 18px; 
+  color: var(--success); 
+  font-weight: 500;
+  min-height: 1.2em;
+  transition: opacity 0.3s ease;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: all 0.3s ease;
+}
+#advice:empty { opacity: 0; }
+#advice:not(:empty) { opacity: 1; }
+#advice:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-border);
+}
+#advice:active {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(0.98);
+}
 
     /* Weather */
     #weather .temp { font-size: 48px; font-weight: 700; }

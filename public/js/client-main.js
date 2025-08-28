@@ -21,6 +21,19 @@ initWS();
 $('sendBtn').addEventListener('click', sendChat);
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
+// 메시지 클릭 시 변경
+$('advice').addEventListener('click', async () => {
+  try {
+    const response = await fetch('/api/personalized-message/change', { method: 'POST' });
+    if (response.ok) {
+      const data = await response.json();
+      $('advice').textContent = data.message;
+    }
+  } catch (error) {
+    console.error('메시지 변경 실패:', error);
+  }
+});
+
 // 클릭 시 모든 자막 서서히 제거
 document.addEventListener('click', () => {
   document.querySelectorAll('#captions .caption').forEach(el => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); });
