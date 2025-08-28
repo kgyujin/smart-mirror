@@ -2,6 +2,7 @@ const axios = require('axios');
 const { PORT } = require('./config');
 const { log } = require('./logging');
 const { fetchWeatherData } = require('./weather');
+const { fetchTodayEvents, formatKSTTimeFromISO } = require('./calendar');
 
 // 대화 컨텍스트 관리 시스템
 class ConversationContext {
@@ -384,7 +385,25 @@ const processRecognizedCommand = async (text, dependencies) => {
       reply = `오늘은 ${formatKSTDate()}입니다.`;
       if (/(요일)/.test(trimmed)) reply += ` ${weekday}입니다.`;
     }
-    // 5. 일반 대화는 GPT에 위임
+    // 5. 일정 관련 질문
+    else if (/(일정|스케줄|캘린더|미팅|회의|약속)/.test(trimmed)) {
+      try {
+        const events = await fetchTodayEvents();
+        if (events && events.length > 0) {
+          const eventList = events.slice(0, 3).map(ev => {
+            const time = ev.start ? formatKSTTimeFromISO(ev.start) : '종일';
+            return `${time} ${ev.summary}`;
+          }).join(', ');
+          reply = `오늘 일정: ${eventList}`;
+        } else {
+          reply = '오늘 등록된 일정이 없습니다.';
+        }
+      } catch (error) {
+        log.error('일정 조회 실패:', error.message);
+        reply = '일정을 불러오는 데 실패했습니다.';
+      }
+    }
+    // 6. 일반 대화는 GPT에 위임
     else {
       reply = await answerWithGPT(trimmed, {}, openai);
     }

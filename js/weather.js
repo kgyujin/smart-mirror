@@ -245,10 +245,16 @@ const environmentalAwareness = {
         message: '저녁 시간입니다. 하루 수고하셨습니다',
         priority: 'medium'
       };
-    } else {
+    } else if (hour >= 21 && hour < 24) {
       return {
         type: 'time',
         message: '밤 시간입니다. 편안한 밤 되세요',
+        priority: 'low'
+      };
+    } else {
+      return {
+        type: 'time',
+        message: '새벽 시간입니다. 푹 주무세요',
         priority: 'low'
       };
     }

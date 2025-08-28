@@ -184,13 +184,15 @@ const fetchEventsForDay = async (targetDate = null) => {
   const oauth2Client = getOAuth2ClientForCalendar();
   if (!oauth2Client) throw new Error('캘린더 인증 없음');
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  const base = targetDate ? new Date(targetDate) : new Date();
-  const timeMin = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 0, 0, 0).toISOString();
-  const timeMax = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 59).toISOString();
+  
+  // KST 기준으로 날짜 범위 설정
+  const base = targetDate ? new Date(targetDate) : getKSTNow();
+  const { start, end } = getKstDayRangeFor(base);
+  
   const resp = await calendar.events.list({
     calendarId: 'primary',
-    timeMin,
-    timeMax,
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
     singleEvents: true,
     orderBy: 'startTime',
     maxResults: 50,

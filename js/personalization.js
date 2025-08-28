@@ -76,6 +76,9 @@ class PersonalizationSystem {
       // 현재 상황 분석
       const context = await this.analyzeCurrentContext();
       
+      // 일정 기반 메시지 우선 확인
+      const scheduleSuggestion = this.getScheduleBasedMessage(context.events, hour);
+      
       // 환경 인식 기반 메시지 우선 생성 (매개변수 또는 import된 객체 사용)
       const envAwarenessObj = envAwareness || environmentalAwareness;
       const weatherSuggestion = envAwarenessObj?.getWeatherBasedSuggestions?.(context.weather);
@@ -86,22 +89,27 @@ class PersonalizationSystem {
       let selectedMessage = null;
       let selectedType = '';
       
-      // 1. 날씨 관련 (높은 우선순위)
-      if (weatherSuggestion && weatherSuggestion.priority === 'high') {
+      // 1. 일정 관련 (최고 우선순위)
+      if (scheduleSuggestion) {
+        selectedMessage = scheduleSuggestion.message;
+        selectedType = 'schedule';
+      }
+      // 2. 날씨 관련 (높은 우선순위)
+      else if (weatherSuggestion && weatherSuggestion.priority === 'high') {
         selectedMessage = weatherSuggestion.message;
         selectedType = 'weather_high';
       }
-      // 2. 계절 관련 (중간 우선순위)
+      // 3. 계절 관련 (중간 우선순위)
       else if (seasonalContent && seasonalContent.priority === 'medium') {
         selectedMessage = seasonalContent.message;
         selectedType = 'seasonal_medium';
       }
-      // 3. 시간대 관련 (중간 우선순위)
+      // 4. 시간대 관련 (중간 우선순위)
       else if (timeSuggestion && timeSuggestion.priority === 'medium') {
         selectedMessage = timeSuggestion.message;
         selectedType = 'time_medium';
       }
-      // 4. 기타 환경 메시지
+      // 5. 기타 환경 메시지
       else if (weatherSuggestion) {
         selectedMessage = weatherSuggestion.message;
         selectedType = 'weather';
@@ -201,6 +209,66 @@ class PersonalizationSystem {
     return context;
   }
 
+  // 일정 기반 메시지 생성
+  getScheduleBasedMessage(events, currentHour) {
+    if (!events || events.length === 0) {
+      return null;
+    }
+
+    const now = new Date();
+    const currentTime = now.getTime();
+
+    // 현재 진행 중인 일정 확인
+    const ongoingEvent = events.find(event => {
+      if (event.isAllDay) return false;
+      const startTime = new Date(event.time).getTime();
+      const endTime = event.end ? new Date(event.end).getTime() : startTime + (60 * 60 * 1000); // 기본 1시간
+      return startTime <= currentTime && currentTime <= endTime;
+    });
+
+    if (ongoingEvent) {
+      return {
+        message: `현재 "${ongoingEvent.summary}" 진행 중입니다`,
+        type: 'schedule'
+      };
+    }
+
+    // 다음 일정 확인 (1시간 이내)
+    const upcomingEvent = events.find(event => {
+      if (event.isAllDay) return false;
+      const startTime = new Date(event.time).getTime();
+      const timeDiff = startTime - currentTime;
+      return timeDiff > 0 && timeDiff <= 60 * 60 * 1000; // 1시간 이내
+    });
+
+    if (upcomingEvent) {
+      const startTime = new Date(upcomingEvent.time);
+      const minutesUntil = Math.round((startTime.getTime() - currentTime) / (1000 * 60));
+      return {
+        message: `${minutesUntil}분 후 "${upcomingEvent.summary}" 예정입니다`,
+        type: 'schedule'
+      };
+    }
+
+    // 오늘 일정 개수에 따른 메시지
+    const todayEvents = events.filter(event => {
+      const eventDate = new Date(event.time);
+      const today = new Date();
+      return eventDate.getDate() === today.getDate() && 
+             eventDate.getMonth() === today.getMonth() && 
+             eventDate.getFullYear() === today.getFullYear();
+    });
+
+    if (todayEvents.length > 0) {
+      return {
+        message: `오늘 ${todayEvents.length}개의 일정이 있습니다`,
+        type: 'schedule'
+      };
+    }
+
+    return null;
+  }
+
   // 규칙 기반 메시지 생성
   generateRuleBasedMessage(now, hour, dayOfWeekName) {
     // 시간대별 기본 메시지
@@ -214,11 +282,11 @@ class PersonalizationSystem {
       return '오후도 파이팅입니다!';
     } else if (hour >= 18 && hour < 21) {
       return '하루 수고하셨습니다';
-    } else if (hour >= 21) {
+    } else if (hour >= 21 && hour < 24) {
       return '편안한 밤 되세요';
+    } else {
+      return '새벽 시간입니다. 푹 주무세요';
     }
-    
-    return '';
   }
 
   // 사용자 패턴 요약
