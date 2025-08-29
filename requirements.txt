@@ -1,5 +1,5 @@
 # SpeechBrain 기반 감정 분석을 위한 Python 의존성
-# python3 install_speechbrain.py
+# 라즈베리파이에서 설치 시: python3 install_speechbrain.py
 
 # 기본 과학 계산 라이브러리
 numpy>=1.21.0
@@ -17,5 +17,5 @@ soundfile>=0.10.0
 # 유틸리티
 tqdm>=4.60.0
 
-# SpeechBrain
+# SpeechBrain (GitHub에서 직접 설치)
 # git+https://github.com/speechbrain/speechbrain.git@develop

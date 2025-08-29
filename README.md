@@ -100,17 +100,18 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 3. 의존성 설치
    ```bash
    npm install
-   ```
-   
-   **감정 분석 모델 설치 (라즈베리파이):**
-   ```bash
-   python3 install_speechbrain.py
-   ```
-4. 서버 실행
+    ```
+    
+    **감정 분석 모델 설치 (라즈베리파이):**
+    ```bash
+    python3 install_speechbrain.py
+    ```
+        ```
+  4. 서버 실행
    ```bash
    node app.js
-   ```
-5. 웹 인터페이스 접속
+        ```
+  5. 웹 인터페이스 접속
    ```
    http://localhost:3000
    ```
@@ -126,6 +127,9 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 | `/api/chat` | POST | 텍스트 대화 처리 |
 | `/api/mic/toggle` | POST | 마이크 토글 |
 | `/api/personalized-message` | GET | 개인화 메시지 |
+| `/api/personalized-message/change` | POST | 개인화 메시지 변경 |
+| `/api/emotion` | GET | 현재 감정 분석 결과 |
+| `/api/emotion/recommendations` | GET | 감정 기반 추천 |
 | `/api/summary` | GET | 일일 요약 |
 | `/api/health` | GET | 서버 상태 체크 |
 | `/api/emotion` | GET | 현재 감정 분석 결과 |
