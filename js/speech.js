@@ -114,7 +114,7 @@ const startEmotionAnalysis = (broadcast) => {
   emotionAnalysisInterval = setInterval(async () => {
     if (currentAudioBuffer && currentAudioBuffer.length > 16000) { // 최소 1초 분량
       try {
-        const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromStream(currentAudioBuffer);
+        const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
         
         if (emotionResult.emotion !== 'unknown' && emotionResult.confidence > 0.5) {
           log.info('감정 분석 결과:', emotionResult);

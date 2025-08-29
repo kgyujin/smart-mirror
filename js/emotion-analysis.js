@@ -240,11 +240,13 @@ except Exception as e:
         log.info('SpeechBrain 모델 초기화 완료');
       } else {
         log.error('SpeechBrain 모델 초기화 실패:', result.message);
+        log.info('JavaScript 기반 감정 분석을 사용합니다.');
         this.isModelLoaded = false;
       }
       
     } catch (error) {
       log.error('SpeechBrain 모델 초기화 중 오류:', error.message);
+      log.info('JavaScript 기반 감정 분석을 사용합니다.');
       this.isModelLoaded = false;
     }
   }
