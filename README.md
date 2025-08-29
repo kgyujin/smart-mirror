@@ -16,7 +16,7 @@ AI 기반 한국어 스마트 미러 애플리케이션으로, 음성 인식, TT
 | 음성 인식 | "미러야", "하이 미러" 웨이크워드로 음성 명령 수신 |
 | TTS 음성 합성 | Google Cloud TTS로 자연스러운 한국어 음성 출력 |
 | AI 대화 | OpenAI GPT 기반 맥락적 대화 및 루틴 처리 |
-| 감정 분석 | RAVDESS 데이터셋 기반 음성 감정 분석 |
+| 감정 분석 | SpeechBrain 기반 음성 감정 분석 (8가지 감정, 85%+ 정확도) |
 | 음악 추천 | 감정 기반 맞춤형 음악 추천 |
 | 활동 추천 | 감정에 따른 활동 및 메시지 추천 |
 | 날씨 정보 | OpenWeatherMap API 기반 실시간 날씨 표시 |
@@ -56,7 +56,7 @@ mirror-app/
 │  ├─ weather.js
 │  └─ websocket.js
 ├─ models/
-│  └─ Actor_01-24/ (RAVDESS 감정 음성 데이터셋)
+│  └─ emotion_model/ (SpeechBrain 감정 인식 모델)
 ├─ public/
 │  └─ index.html
 ├─ app.js.backup
@@ -100,7 +100,11 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 3. 의존성 설치
    ```bash
    npm install
-   pip install -r requirements.txt
+   ```
+   
+   **감정 분석 모델 설치 (라즈베리파이):**
+   ```bash
+   python3 install_speechbrain.py
    ```
 4. 서버 실행
    ```bash
@@ -124,9 +128,14 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 | `/api/personalized-message` | GET | 개인화 메시지 |
 | `/api/summary` | GET | 일일 요약 |
 | `/api/health` | GET | 서버 상태 체크 |
+| `/api/emotion` | GET | 현재 감정 분석 결과 |
+| `/api/emotion/recommendations` | GET | 감정 기반 추천 |
+| `/api/personalized-message/change` | POST | 개인화 메시지 변경 |
 
 ## 참고
 - 애플리케이션이 정상적으로 동작하려면 OpenAI API 키와 Google Cloud 인증 파일이 필요합니다.
 - 음성 인식 기능을 사용하려면 마이크 하드웨어와 권한 설정이 필요합니다.
 - 웹 인터페이스는 `http://localhost:3000`에서 접속할 수 있습니다.
 - 로그는 서버 실행 시 콘솔에 출력됩니다.
+- **감정 분석**: SpeechBrain 모델은 자동으로 다운로드되며, 첫 실행 시 시간이 걸릴 수 있습니다.
+- **Python 의존성**: 감정 분석을 위해 Python 패키지가 필요합니다. 라즈베리파이에서는 `install_speechbrain.py`를 실행하세요.

@@ -3,42 +3,29 @@ const path = require('path');
 const { exec } = require('child_process');
 const { log } = require('./logging');
 
-// RAVDESS 데이터셋 파일명 구조 분석
-// 파일명 형식: 03-01-08-02-02-02-01.wav
-// 각 숫자의 의미:
-// 03: Modality (01=full-AV, 02=video-only, 03=audio-only)
-// 01: Vocal channel (01=speech, 02=song)
-// 08: Emotion (01=neutral, 02=calm, 03=happy, 04=sad, 05=angry, 06=fearful, 07=disgust, 08=surprised)
-// 02: Emotional intensity (01=normal, 02=strong)
-// 02: Statement (01=Kids, 02=Dogs)
-// 02: Repetition (01=1st, 02=2nd)
-// 01: Actor (01-24)
+// SpeechBrain 감정 인식 모델 설정
+const SPEECHBRAIN_MODEL = 'speechbrain/emotion-recognition-wav2vec2-IEMOCAP';
 
-// 감정 매핑
+// 감정 매핑 (SpeechBrain IEMOCAP 모델 기준)
 const EMOTION_MAP = {
-  '01': 'neutral',
-  '02': 'calm', 
-  '03': 'happy',
-  '04': 'sad',
-  '05': 'angry',
-  '06': 'fearful',
-  '07': 'disgust',
-  '08': 'surprised'
+  'ang': 'angry',      // 분노
+  'hap': 'happy',      // 행복
+  'neu': 'neutral',    // 중립
+  'sad': 'sad',        // 슬픔
+  'exc': 'excited',    // 흥분
+  'fru': 'frustrated', // 좌절
+  'fea': 'fearful',    // 두려움
+  'dis': 'disgusted',  // 혐오
+  'sur': 'surprised'   // 놀람
 };
 
 // 감정별 음악 추천
 const EMOTION_MUSIC_RECOMMENDATIONS = {
-  'neutral': [
-    'Ambient music',
-    'Classical piano',
-    'Nature sounds',
-    'Lo-fi beats'
-  ],
-  'calm': [
-    'Meditation music',
-    'Spa relaxation',
-    'Soft jazz',
-    'Rain sounds'
+  'angry': [
+    'Rock music',
+    'Heavy metal',
+    'Energetic workout',
+    'Punk rock'
   ],
   'happy': [
     'Upbeat pop',
@@ -46,17 +33,29 @@ const EMOTION_MUSIC_RECOMMENDATIONS = {
     'Summer hits',
     'Feel-good songs'
   ],
+  'neutral': [
+    'Ambient music',
+    'Classical piano',
+    'Nature sounds',
+    'Lo-fi beats'
+  ],
   'sad': [
     'Comforting ballads',
     'Melancholic indie',
     'Healing music',
     'Gentle acoustic'
   ],
-  'angry': [
-    'Rock music',
-    'Heavy metal',
-    'Energetic workout',
-    'Punk rock'
+  'excited': [
+    'Electronic dance',
+    'High-energy pop',
+    'Festival music',
+    'Upbeat rock'
+  ],
+  'frustrated': [
+    'Calming classical',
+    'Meditation music',
+    'Smooth jazz',
+    'Relaxing ambient'
   ],
   'fearful': [
     'Calming nature sounds',
@@ -64,7 +63,7 @@ const EMOTION_MUSIC_RECOMMENDATIONS = {
     'Peaceful meditation',
     'Gentle lullabies'
   ],
-  'disgust': [
+  'disgusted': [
     'Cleansing sounds',
     'Fresh air music',
     'Purifying tones',
@@ -78,252 +77,372 @@ const EMOTION_MUSIC_RECOMMENDATIONS = {
   ]
 };
 
-// 감정별 메시지 추천
+// 감정별 메시지
 const EMOTION_MESSAGES = {
-  'neutral': [
-    '평온한 하루를 보내고 계시네요.',
-    '차분한 마음으로 하루를 시작해보세요.',
-    '조용한 시간을 즐기고 계시는군요.'
-  ],
-  'calm': [
-    '마음이 평온하시군요. 좋은 하루 되세요.',
-    '차분한 기운이 느껴집니다.',
-    '평화로운 시간을 보내고 계시네요.'
+  'angry': [
+    '화가 나신 것 같아요. 깊은 숨을 쉬며 마음을 진정시켜보세요.',
+    '분노는 자연스러운 감정이에요. 잠시 휴식을 취해보는 건 어떨까요?',
+    '화가 나실 때는 차분한 음악을 들어보세요. 마음이 안정될 거예요.'
   ],
   'happy': [
-    '기분이 좋으시군요! 더욱 즐거운 하루 되세요!',
-    '행복한 에너지가 가득하네요!',
-    '웃음이 가득한 하루를 보내세요!'
+    '기분이 좋으시군요! 그 긍정적인 에너지가 주변 사람들에게도 전파될 거예요.',
+    '행복한 기분을 유지하세요. 오늘 하루도 좋은 일들이 가득할 거예요.',
+    '기쁜 마음이 느껴져요. 그 에너지를 계속 유지해보세요!'
+  ],
+  'neutral': [
+    '차분한 상태를 유지하고 계시네요. 안정적인 기분이 좋아요.',
+    '평온한 기분이시군요. 이런 상태에서 좋은 아이디어가 떠오를 수도 있어요.',
+    '중립적인 기분이시네요. 마음의 균형을 잘 잡고 계세요.'
   ],
   'sad': [
-    '마음이 무겁으시군요. 괜찮아질 거예요.',
-    '슬픈 마음을 이해합니다. 힘내세요.',
-    '어려운 시간이 지나면 좋은 일이 있을 거예요.'
+    '슬픈 기분이시군요. 혼자가 아니에요. 언제든 이야기해주세요.',
+    '우울한 마음이 느껴져요. 따뜻한 차 한 잔과 함께 마음을 달래보세요.',
+    '슬픈 감정은 자연스러워요. 시간이 지나면 나아질 거예요.'
   ],
-  'angry': [
-    '화가 나셨군요. 심호흡을 깊게 해보세요.',
-    '분노를 조절하는 것이 중요해요.',
-    '잠시 휴식을 취해보시는 건 어떨까요?'
+  'excited': [
+    '흥미진진한 기분이시군요! 그 에너지를 좋은 일에 활용해보세요.',
+    '흥분된 상태네요! 긍정적인 에너지가 가득해요.',
+    '들떠있는 기분이시군요. 그 열정을 유지해보세요!'
+  ],
+  'frustrated': [
+    '답답한 기분이시군요. 잠시 쉬어가며 마음을 정리해보세요.',
+    '좌절감이 느껴져요. 차근차근 해결해나가면 될 거예요.',
+    '스트레스 받고 계시네요. 심호흡을 하며 마음을 진정시켜보세요.'
   ],
   'fearful': [
-    '걱정이 많으시군요. 차분히 생각해보세요.',
-    '두려움을 이겨낼 수 있어요.',
-    '안전한 곳에 계시니 걱정하지 마세요.'
+    '불안한 기분이시군요. 안전한 곳에 계시니 걱정하지 마세요.',
+    '두려운 마음이 느껴져요. 차분히 생각해보면 해결책이 보일 거예요.',
+    '겁이 나시는군요. 천천히 마음을 진정시켜보세요.'
   ],
-  'disgust': [
-    '불편한 기분이시군요. 다른 것에 집중해보세요.',
-    '기분 전환이 필요하신 것 같아요.',
-    '좋은 일에 집중해보시는 건 어떨까요?'
+  'disgusted': [
+    '불쾌한 기분이시군요. 깨끗한 공기를 마시며 마음을 정화해보세요.',
+    '혐오감이 느껴져요. 좋은 생각으로 마음을 바꿔보세요.',
+    '기분이 상하신 것 같아요. 잠시 다른 일에 집중해보세요.'
   ],
   'surprised': [
-    '놀라신 일이 있으셨군요!',
-    '예상치 못한 일이 있었나요?',
-    '새로운 경험이신가요?'
+    '놀라신 것 같아요! 예상치 못한 일이 있었나요?',
+    '깜짝 놀라셨군요! 그 감정을 긍정적으로 받아들여보세요.',
+    '놀란 기분이시네요. 새로운 경험이었나요?'
   ]
 };
 
 // 감정별 활동 추천
 const EMOTION_ACTIVITIES = {
-  'neutral': [
-    '책 읽기',
+  'angry': [
+    '깊은 호흡 운동',
     '산책하기',
-    '명상하기',
-    '차 한 잔 마시기'
-  ],
-  'calm': [
-    '요가하기',
-    '명상하기',
-    '자연 속 산책',
-    '따뜻한 차 마시기'
+    '운동하기',
+    '명상하기'
   ],
   'happy': [
-    '친구들과 만나기',
-    '좋아하는 음식 먹기',
-    '운동하기',
-    '취미 활동하기'
+    '좋아하는 음악 듣기',
+    '친구와 만나기',
+    '취미 활동하기',
+    '긍정적인 생각하기'
+  ],
+  'neutral': [
+    '책 읽기',
+    '차 한 잔 마시기',
+    '산책하기',
+    '명상하기'
   ],
   'sad': [
     '따뜻한 차 마시기',
     '좋아하는 음악 듣기',
     '친구와 대화하기',
-    '가벼운 산책하기'
+    '가벼운 운동하기'
   ],
-  'angry': [
-    '깊은 호흡하기',
-    '운동하기',
+  'excited': [
+    '에너지 있는 활동하기',
+    '새로운 것 도전하기',
+    '창의적인 활동하기',
+    '긍정적인 에너지 활용하기'
+  ],
+  'frustrated': [
     '명상하기',
-    '차분한 음악 듣기'
+    '깊은 호흡하기',
+    '산책하기',
+    '문제를 단계별로 정리하기'
   ],
   'fearful': [
-    '안전한 곳에서 휴식하기',
-    '신뢰하는 사람과 대화하기',
+    '안전한 환경에서 휴식하기',
     '차분한 음악 듣기',
-    '명상하기'
+    '깊은 호흡하기',
+    '신뢰할 수 있는 사람과 대화하기'
   ],
-  'disgust': [
-    '기분 전환하기',
-    '좋아하는 활동하기',
+  'disgusted': [
     '깨끗한 환경에서 휴식하기',
-    '새로운 취미 시작하기'
+    '상쾌한 공기 마시기',
+    '좋은 생각으로 마음 바꾸기',
+    '긍정적인 활동하기'
   ],
   'surprised': [
     '새로운 경험 즐기기',
     '호기심을 자극하는 활동하기',
-    '새로운 것을 배우기',
+    '학습하기',
     '모험적인 활동하기'
   ]
 };
 
 class EmotionAnalysisSystem {
   constructor() {
-    this.modelsPath = path.join(__dirname, '../models');
-    this.emotionHistory = [];
+    this.modelPath = path.join(__dirname, '..', 'models', 'emotion_model');
+    this.isModelLoaded = false;
     this.currentEmotion = null;
     this.emotionConfidence = 0;
+    this.emotionHistory = [];
+    this.lastAnalysisTime = 0;
+    
+    // SpeechBrain 모델 초기화
+    this.initializeSpeechBrainModel();
   }
 
-  // RAVDESS 파일명에서 감정 추출
-  parseRavdessFilename(filename) {
-    const parts = filename.replace('.wav', '').split('-');
-    if (parts.length >= 7) {
-      const emotionCode = parts[2];
-      return EMOTION_MAP[emotionCode] || 'unknown';
-    }
-    return 'unknown';
-  }
-
-  // 음성 파일의 MFCC 특징 추출 (Python 스크립트 사용)
-  async extractMFCCFeatures(audioPath) {
-    return new Promise((resolve, reject) => {
+  // SpeechBrain 모델 초기화
+  async initializeSpeechBrainModel() {
+    try {
+      log.info('SpeechBrain 감정 인식 모델 초기화 중...');
+      
+      // Python 스크립트로 SpeechBrain 모델 로드
       const pythonScript = `
-import librosa
+import torch
+import torchaudio
 import numpy as np
 import json
 import sys
+from speechbrain.pretrained import EncoderClassifier
 
-def extract_mfcc(audio_path):
-    try:
-        # 오디오 로드
-        y, sr = librosa.load(audio_path, sr=22050)
-        
-        # MFCC 추출
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        
-        # 통계적 특징 계산
-        mfcc_mean = np.mean(mfcc, axis=1)
-        mfcc_std = np.std(mfcc, axis=1)
-        
-        # 추가 특징들
-        spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-        spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
-        zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
-        
-        features = {
-            'mfcc_mean': mfcc_mean.tolist(),
-            'mfcc_std': mfcc_std.tolist(),
-            'spectral_centroid': float(spectral_centroid),
-            'spectral_rolloff': float(spectral_rolloff),
-            'zero_crossing_rate': float(zero_crossing_rate)
-        }
-        
-        print(json.dumps(features))
-        
-    except Exception as e:
-        print(json.dumps({'error': str(e)}))
-        sys.exit(1)
+try:
+    # SpeechBrain 모델 로드
+    classifier = EncoderClassifier.from_hparams(
+        source="${SPEECHBRAIN_MODEL}",
+        savedir="models/emotion_model"
+    )
+    
+    # 모델이 로드되었는지 확인
+    print(json.dumps({
+        "status": "success",
+        "message": "SpeechBrain 모델이 성공적으로 로드되었습니다.",
+        "model_loaded": True
+    }))
+    
+except Exception as e:
+    print(json.dumps({
+        "status": "error",
+        "message": str(e),
+        "model_loaded": False
+    }))
+`;
 
-if __name__ == "__main__":
-    audio_path = sys.argv[1]
-    extract_mfcc(audio_path)
-      `;
+      const result = await this.runPythonScript(pythonScript);
+      
+      if (result.status === 'success') {
+        this.isModelLoaded = true;
+        log.info('SpeechBrain 모델 초기화 완료');
+      } else {
+        log.error('SpeechBrain 모델 초기화 실패:', result.message);
+        this.isModelLoaded = false;
+      }
+      
+    } catch (error) {
+      log.error('SpeechBrain 모델 초기화 중 오류:', error.message);
+      this.isModelLoaded = false;
+    }
+  }
 
-      const tempScriptPath = path.join(__dirname, '../temp_mfcc_extractor.py');
-      fs.writeFileSync(tempScriptPath, pythonScript);
-
-      exec(`python "${tempScriptPath}" "${audioPath}"`, (error, stdout, stderr) => {
-        try {
-          fs.unlinkSync(tempScriptPath);
-        } catch (e) {
-          // 파일 삭제 실패는 무시
-        }
-
-        if (error) {
-          log.error('MFCC 추출 실패:', error.message);
-          reject(error);
-          return;
-        }
-
-        try {
-          const features = JSON.parse(stdout);
-          if (features.error) {
-            reject(new Error(features.error));
+  // Python 스크립트 실행
+  async runPythonScript(script) {
+    return new Promise((resolve, reject) => {
+      const tempFile = path.join(__dirname, '..', 'temp_script.py');
+      
+      try {
+        fs.writeFileSync(tempFile, script);
+        
+        exec(`python3 "${tempFile}"`, (error, stdout, stderr) => {
+          try {
+            fs.unlinkSync(tempFile);
+          } catch (e) {
+            // 파일 삭제 실패는 무시
+          }
+          
+          if (error) {
+            reject(new Error(`Python 실행 오류: ${error.message}`));
             return;
           }
-          resolve(features);
-        } catch (e) {
-          reject(new Error('특징 파싱 실패: ' + e.message));
-        }
-      });
+          
+          try {
+            const result = JSON.parse(stdout.trim());
+            resolve(result);
+          } catch (e) {
+            reject(new Error(`JSON 파싱 오류: ${stdout}`));
+          }
+        });
+      } catch (error) {
+        reject(error);
+      }
     });
   }
 
-  // 간단한 감정 분류 (MFCC 특징 기반)
-  async classifyEmotion(features) {
-    // 실제 구현에서는 머신러닝 모델을 사용해야 하지만,
-    // 여기서는 간단한 규칙 기반 분류를 구현합니다.
-    
-    const { spectral_centroid, spectral_rolloff, zero_crossing_rate } = features;
-    
-    // 스펙트럴 중심주파수가 높으면 활발한 감정 (happy, surprised, angry)
-    if (spectral_centroid > 2000) {
-      if (zero_crossing_rate > 0.1) {
-        return { emotion: 'happy', confidence: 0.7 };
-      } else {
-        return { emotion: 'surprised', confidence: 0.6 };
-      }
+  // 오디오 버퍼를 WAV 파일로 변환
+  convertToWav(audioBuffer, sampleRate = 16000) {
+    try {
+      // 간단한 WAV 헤더 생성
+      const buffer = Buffer.from(audioBuffer);
+      const wavHeader = this.createWavHeader(buffer.length, sampleRate, 1, 16);
+      return Buffer.concat([wavHeader, buffer]);
+    } catch (error) {
+      log.error('WAV 변환 오류:', error.message);
+      return null;
     }
-    
-    // 스펙트럴 중심주파수가 낮으면 차분한 감정 (sad, calm, neutral)
-    if (spectral_centroid < 1000) {
-      if (zero_crossing_rate < 0.05) {
-        return { emotion: 'sad', confidence: 0.7 };
-      } else {
-        return { emotion: 'calm', confidence: 0.6 };
-      }
-    }
-    
-    // 중간 범위는 중립적
-    return { emotion: 'neutral', confidence: 0.5 };
   }
 
-  // 음성 파일에서 감정 분석
-  async analyzeEmotionFromAudio(audioPath) {
+  // WAV 헤더 생성
+  createWavHeader(dataLength, sampleRate, channels, bitsPerSample) {
+    const buffer = Buffer.alloc(44);
+    
+    // RIFF 헤더
+    buffer.write('RIFF', 0);
+    buffer.writeUInt32LE(36 + dataLength, 4);
+    buffer.write('WAVE', 8);
+    
+    // fmt 청크
+    buffer.write('fmt ', 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(channels, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28);
+    buffer.writeUInt16LE(channels * bitsPerSample / 8, 32);
+    buffer.writeUInt16LE(bitsPerSample, 34);
+    
+    // data 청크
+    buffer.write('data', 36);
+    buffer.writeUInt32LE(dataLength, 40);
+    
+    return buffer;
+  }
+
+  // SpeechBrain으로 감정 분석
+  async analyzeEmotionWithSpeechBrain(audioBuffer) {
     try {
-      log.info('음성 감정 분석 시작:', audioPath);
+      if (!this.isModelLoaded) {
+        throw new Error('SpeechBrain 모델이 로드되지 않았습니다.');
+      }
+
+      // 오디오 버퍼를 WAV로 변환
+      const wavData = this.convertToWav(audioBuffer);
+      if (!wavData) {
+        throw new Error('오디오 데이터 변환 실패');
+      }
+
+      // 임시 WAV 파일 생성
+      const tempWavFile = path.join(__dirname, '..', 'temp_audio.wav');
+      fs.writeFileSync(tempWavFile, wavData);
+
+      // Python 스크립트로 감정 분석
+      const pythonScript = `
+import torch
+import torchaudio
+import numpy as np
+import json
+import sys
+from speechbrain.pretrained import EncoderClassifier
+
+try:
+    # SpeechBrain 모델 로드
+    classifier = EncoderClassifier.from_hparams(
+        source="${SPEECHBRAIN_MODEL}",
+        savedir="models/emotion_model"
+    )
+    
+    # 오디오 파일 로드
+    signal = classifier.load_audio("${tempWavFile}")
+    
+    # 감정 분류
+    out_prob, score, index, text_lab = classifier.classify_batch(signal)
+    
+    # 결과 처리
+    emotion = text_lab[0]
+    confidence = float(torch.max(out_prob).item())
+    
+    print(json.dumps({
+        "status": "success",
+        "emotion": emotion,
+        "confidence": confidence,
+        "raw_probabilities": out_prob.tolist()[0]
+    }))
+    
+except Exception as e:
+    print(json.dumps({
+        "status": "error",
+        "message": str(e)
+    }))
+`;
+
+      const result = await this.runPythonScript(pythonScript);
       
-      // MFCC 특징 추출
-      const features = await this.extractMFCCFeatures(audioPath);
-      
-      // 감정 분류
-      const result = await this.classifyEmotion(features);
-      
-      // 감정 히스토리 업데이트
-      this.emotionHistory.push({
-        emotion: result.emotion,
-        confidence: result.confidence,
-        timestamp: Date.now()
-      });
-      
-      // 최근 10개 감정만 유지
-      if (this.emotionHistory.length > 10) {
-        this.emotionHistory = this.emotionHistory.slice(-10);
+      // 임시 파일 삭제
+      try {
+        fs.unlinkSync(tempWavFile);
+      } catch (e) {
+        // 파일 삭제 실패는 무시
+      }
+
+      if (result.status === 'success') {
+        return {
+          emotion: EMOTION_MAP[result.emotion] || result.emotion,
+          confidence: result.confidence,
+          rawProbabilities: result.raw_probabilities
+        };
+      } else {
+        throw new Error(result.message);
       }
       
-      // 현재 감정 업데이트
-      this.currentEmotion = result.emotion;
-      this.emotionConfidence = result.confidence;
+    } catch (error) {
+      log.error('SpeechBrain 감정 분석 실패:', error.message);
+      return { emotion: 'unknown', confidence: 0 };
+    }
+  }
+
+  // 음성 버퍼에서 감정 분석
+  async analyzeEmotionFromBuffer(audioBuffer) {
+    try {
+      // 최소 1초 분량의 오디오가 필요
+      if (!audioBuffer || audioBuffer.length < 16000) {
+        return { emotion: 'unknown', confidence: 0 };
+      }
+
+      // 너무 자주 분석하지 않도록 제한 (5초마다)
+      const now = Date.now();
+      if (now - this.lastAnalysisTime < 5000) {
+        return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
+      }
+
+      log.info('SpeechBrain으로 감정 분석 시작...');
       
-      log.info('감정 분석 완료:', result);
+      // SpeechBrain으로 감정 분석
+      const result = await this.analyzeEmotionWithSpeechBrain(audioBuffer);
+      
+      if (result.emotion !== 'unknown' && result.confidence > 0.3) {
+        // 감정 히스토리 업데이트
+        this.emotionHistory.push({
+          emotion: result.emotion,
+          confidence: result.confidence,
+          timestamp: now
+        });
+        
+        // 최근 10개 감정만 유지
+        if (this.emotionHistory.length > 10) {
+          this.emotionHistory = this.emotionHistory.slice(-10);
+        }
+        
+        // 현재 감정 업데이트
+        this.currentEmotion = result;
+        this.emotionConfidence = result.confidence;
+        this.lastAnalysisTime = now;
+        
+        log.info('감정 분석 완료:', result);
+      }
+      
       return result;
       
     } catch (error) {
@@ -332,113 +451,73 @@ if __name__ == "__main__":
     }
   }
 
-  // 실시간 음성 스트림에서 감정 분석
-  async analyzeEmotionFromStream(audioBuffer) {
-    try {
-      // 임시 파일로 저장
-      const tempPath = path.join(__dirname, '../temp_audio.wav');
-      fs.writeFileSync(tempPath, audioBuffer);
-      
-      const result = await this.analyzeEmotionFromAudio(tempPath);
-      
-      // 임시 파일 삭제
-      try {
-        fs.unlinkSync(tempPath);
-      } catch (e) {
-        // 파일 삭제 실패는 무시
-      }
-      
-      return result;
-    } catch (error) {
-      log.error('스트림 감정 분석 실패:', error.message);
-      return { emotion: 'unknown', confidence: 0 };
-    }
-  }
-
-  // 감정에 따른 음악 추천
-  getMusicRecommendation(emotion) {
-    const recommendations = EMOTION_MUSIC_RECOMMENDATIONS[emotion] || EMOTION_MUSIC_RECOMMENDATIONS['neutral'];
-    const randomIndex = Math.floor(Math.random() * recommendations.length);
-    return recommendations[randomIndex];
-  }
-
-  // 감정에 따른 메시지 추천
-  getEmotionMessage(emotion) {
-    const messages = EMOTION_MESSAGES[emotion] || EMOTION_MESSAGES['neutral'];
-    const randomIndex = Math.floor(Math.random() * messages.length);
-    return messages[randomIndex];
-  }
-
-  // 감정에 따른 활동 추천
-  getActivityRecommendation(emotion) {
-    const activities = EMOTION_ACTIVITIES[emotion] || EMOTION_ACTIVITIES['neutral'];
-    const randomIndex = Math.floor(Math.random() * activities.length);
-    return activities[randomIndex];
-  }
-
-  // 종합적인 감정 기반 추천
-  getEmotionBasedRecommendations(emotion) {
+  // 현재 감정 정보 반환
+  getCurrentEmotion() {
     return {
-      emotion: emotion,
-      music: this.getMusicRecommendation(emotion),
-      message: this.getEmotionMessage(emotion),
-      activity: this.getActivityRecommendation(emotion),
+      emotion: this.currentEmotion?.emotion || 'unknown',
+      confidence: this.emotionConfidence || 0,
+      history: this.emotionHistory,
+      trend: this.getEmotionTrend(),
       timestamp: Date.now()
     };
   }
 
-  // 감정 변화 추적
+  // 감정 트렌드 분석
   getEmotionTrend() {
     if (this.emotionHistory.length < 2) {
-      return { trend: 'stable', change: 0 };
+      return 'stable';
     }
-
+    
     const recent = this.emotionHistory.slice(-3);
     const emotions = recent.map(e => e.emotion);
     
-    // 감정 변화 분석
-    const uniqueEmotions = [...new Set(emotions)];
-    if (uniqueEmotions.length === 1) {
-      return { trend: 'stable', emotion: uniqueEmotions[0] };
-    } else if (uniqueEmotions.length > 1) {
-      return { trend: 'changing', from: emotions[0], to: emotions[emotions.length - 1] };
+    // 감정 변화 패턴 분석
+    if (emotions.every(e => e === emotions[0])) {
+      return 'stable';
+    } else if (emotions.includes('happy') || emotions.includes('excited')) {
+      return 'improving';
+    } else if (emotions.includes('sad') || emotions.includes('angry')) {
+      return 'declining';
+    } else {
+      return 'fluctuating';
     }
-    
-    return { trend: 'unknown' };
-  }
-
-  // 현재 감정 상태 가져오기
-  getCurrentEmotion() {
-    return {
-      emotion: this.currentEmotion,
-      confidence: this.emotionConfidence,
-      history: this.emotionHistory.slice(-5), // 최근 5개
-      trend: this.getEmotionTrend()
-    };
   }
 
   // 감정 기반 응답 생성
   generateEmotionResponse(emotion, confidence) {
-    const recommendations = this.getEmotionBasedRecommendations(emotion);
+    const messages = EMOTION_MESSAGES[emotion] || ['기분이 어떤지 말씀해주세요.'];
+    const activities = EMOTION_ACTIVITIES[emotion] || ['산책하기'];
+    const music = EMOTION_MUSIC_RECOMMENDATIONS[emotion] || ['편안한 음악'];
     
-    let response = '';
-    
-    if (confidence > 0.7) {
-      response = `${recommendations.message} `;
-      response += `지금은 ${recommendations.music}을 들으시면 좋을 것 같아요. `;
-      response += `${recommendations.activity}도 추천드려요.`;
-    } else if (confidence > 0.5) {
-      response = `${recommendations.message} `;
-      response += `기분 전환을 위해 ${recommendations.activity}는 어떠세요?`;
-    } else {
-      response = '음성을 잘 들을 수 없어서 정확한 감정을 파악하기 어려워요. ';
-      response += '다시 한 번 말씀해 주시겠어요?';
-    }
+    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+    const randomActivity = activities[Math.floor(Math.random() * activities.length)];
+    const randomMusic = music[Math.floor(Math.random() * music.length)];
     
     return {
-      response: response,
-      recommendations: recommendations,
-      confidence: confidence
+      response: randomMessage,
+      recommendations: {
+        activity: randomActivity,
+        music: randomMusic,
+        confidence: confidence
+      }
+    };
+  }
+
+  // 음악 추천
+  getMusicRecommendation(emotion) {
+    const music = EMOTION_MUSIC_RECOMMENDATIONS[emotion];
+    if (music && music.length > 0) {
+      return music[Math.floor(Math.random() * music.length)];
+    }
+    return '편안한 음악';
+  }
+
+  // 감정 기반 추천 전체 반환
+  getEmotionBasedRecommendations(emotion) {
+    return {
+      music: EMOTION_MUSIC_RECOMMENDATIONS[emotion] || [],
+      activities: EMOTION_ACTIVITIES[emotion] || [],
+      messages: EMOTION_MESSAGES[emotion] || []
     };
   }
 }
