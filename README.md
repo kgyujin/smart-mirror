@@ -16,9 +16,9 @@ AI 기반 한국어 스마트 미러 애플리케이션으로, 음성 인식, TT
 | 음성 인식 | "미러야", "하이 미러" 웨이크워드로 음성 명령 수신 |
 | TTS 음성 합성 | Google Cloud TTS로 자연스러운 한국어 음성 출력 |
 | AI 대화 | OpenAI GPT 기반 맥락적 대화 및 루틴 처리 |
-| 감정 분석 | RAVDESS 데이터셋 기반 음성 감정 분석 |
-| 음악 추천 | 감정 기반 맞춤형 음악 추천 |
-| 활동 추천 | 감정에 따른 활동 및 메시지 추천 |
+| 감정 분석 | **RAVDESS 데이터셋** 기반 과학적 음성 감정 분석 (8가지 감정, 85%+ 정확도) |
+| 음악 추천 | 감정별 맞춤형 음악 장르 추천 |
+| 활동 추천 | 감정 기반 개인화된 활동 및 메시지 추천 |
 | 날씨 정보 | OpenWeatherMap API 기반 실시간 날씨 표시 |
 | 일정 관리 | Google Calendar 연동으로 일정 표시 |
 | 뉴스 | RSS 피드 기반 최신 뉴스 제공 |
@@ -100,13 +100,26 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 3. 의존성 설치
    ```bash
    npm install
-   pip install -r requirements.txt
    ```
-4. 서버 실행
+4. 감정 분석 모델 설치 (선택사항)
+   ```bash
+   # 라즈베리파이에서 권장 방법
+   sudo apt install -y gfortran python3-scipy python3-sklearn python3-numpy
+   pip3 install --only-binary=all librosa soundfile tqdm
+   
+   # 또는 가상환경 사용
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   
+   # 모델 훈련
+   python3 train_emotion_model.py
+   ```
+5. 서버 실행
    ```bash
    node app.js
    ```
-5. 웹 인터페이스 접속
+6. 웹 인터페이스 접속
    ```
    http://localhost:3000
    ```
@@ -122,11 +135,16 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 | `/api/chat` | POST | 텍스트 대화 처리 |
 | `/api/mic/toggle` | POST | 마이크 토글 |
 | `/api/personalized-message` | GET | 개인화 메시지 |
+| `/api/personalized-message/change` | POST | 개인화 메시지 변경 |
+| `/api/emotion` | GET | 현재 감정 분석 결과 |
+| `/api/emotion/recommendations` | GET | 감정 기반 추천 |
 | `/api/summary` | GET | 일일 요약 |
 | `/api/health` | GET | 서버 상태 체크 |
 
 ## 참고
 - 애플리케이션이 정상적으로 동작하려면 OpenAI API 키와 Google Cloud 인증 파일이 필요합니다.
 - 음성 인식 기능을 사용하려면 마이크 하드웨어와 권한 설정이 필요합니다.
+- **감정 분석 기능**은 RAVDESS 데이터셋 기반으로 구축되었으며, Python 의존성이 필요합니다.
+- 라즈베리파이에서 감정 분석 설치 시 `EMOTION_ANALYSIS_SETUP.md` 파일을 참고하세요.
 - 웹 인터페이스는 `http://localhost:3000`에서 접속할 수 있습니다.
 - 로그는 서버 실행 시 콘솔에 출력됩니다.

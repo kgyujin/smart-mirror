@@ -3,17 +3,6 @@ const path = require('path');
 const { exec } = require('child_process');
 const { log } = require('./logging');
 
-// RAVDESS 데이터셋 파일명 구조 분석
-// 파일명 형식: 03-01-08-02-02-02-01.wav
-// 각 숫자의 의미:
-// 03: Modality (01=full-AV, 02=video-only, 03=audio-only)
-// 01: Vocal channel (01=speech, 02=song)
-// 08: Emotion (01=neutral, 02=calm, 03=happy, 04=sad, 05=angry, 06=fearful, 07=disgust, 08=surprised)
-// 02: Emotional intensity (01=normal, 02=strong)
-// 02: Statement (01=Kids, 02=Dogs)
-// 02: Repetition (01=1st, 02=2nd)
-// 01: Actor (01-24)
-
 // 감정 매핑
 const EMOTION_MAP = {
   '01': 'neutral',
@@ -98,27 +87,27 @@ const EMOTION_MESSAGES = {
   'sad': [
     '마음이 무겁으시군요. 괜찮아질 거예요.',
     '슬픈 마음을 이해합니다. 힘내세요.',
-    '어려운 시간이 지나면 좋은 일이 있을 거예요.'
+    '어려운 시간을 보내고 계시는군요. 곧 좋아질 거예요.'
   ],
   'angry': [
-    '화가 나셨군요. 심호흡을 깊게 해보세요.',
-    '분노를 조절하는 것이 중요해요.',
-    '잠시 휴식을 취해보시는 건 어떨까요?'
+    '화가 나신 것 같네요. 깊은 호흡을 해보세요.',
+    '분노를 느끼고 계시는군요. 잠시 휴식을 취해보세요.',
+    '화가 나실 만한 상황이었겠어요. 차분해지세요.'
   ],
   'fearful': [
-    '걱정이 많으시군요. 차분히 생각해보세요.',
-    '두려움을 이겨낼 수 있어요.',
-    '안전한 곳에 계시니 걱정하지 마세요.'
+    '불안하신 것 같네요. 안전한 곳에서 휴식을 취해보세요.',
+    '두려움을 느끼고 계시는군요. 괜찮아요.',
+    '걱정이 많으시군요. 차분히 생각해보세요.'
   ],
   'disgust': [
-    '불편한 기분이시군요. 다른 것에 집중해보세요.',
-    '기분 전환이 필요하신 것 같아요.',
-    '좋은 일에 집중해보시는 건 어떨까요?'
+    '싫증을 느끼고 계시는군요. 기분 전환을 해보세요.',
+    '불쾌감을 느끼고 계시네요. 좋아하는 것을 해보세요.',
+    '기분이 좋지 않으시군요. 새로운 것을 시도해보세요.'
   ],
   'surprised': [
-    '놀라신 일이 있으셨군요!',
-    '예상치 못한 일이 있었나요?',
-    '새로운 경험이신가요?'
+    '놀라신 것 같네요! 흥미로운 일이 있었나요?',
+    '깜짝 놀라셨군요! 어떤 일이 있었나요?',
+    '놀라운 일이 있었나요? 이야기해주세요!'
   ]
 };
 
@@ -127,14 +116,14 @@ const EMOTION_ACTIVITIES = {
   'neutral': [
     '책 읽기',
     '산책하기',
-    '명상하기',
-    '차 한 잔 마시기'
+    '음악 듣기',
+    '명상하기'
   ],
   'calm': [
     '요가하기',
-    '명상하기',
-    '자연 속 산책',
-    '따뜻한 차 마시기'
+    '차 마시기',
+    '그림 그리기',
+    '일기 쓰기'
   ],
   'happy': [
     '친구들과 만나기',
@@ -177,54 +166,288 @@ const EMOTION_ACTIVITIES = {
 class EmotionAnalysisSystem {
   constructor() {
     this.modelsPath = path.join(__dirname, '../models');
+    this.modelPath = path.join(this.modelsPath, 'emotion_model.pkl');
+    this.featurePath = path.join(this.modelsPath, 'emotion_features.json');
     this.emotionHistory = [];
     this.currentEmotion = null;
     this.emotionConfidence = 0;
+    this.audioBuffer = [];
+    this.sampleRate = 16000;
+    this.model = null;
+    this.modelInfo = null;
+    this.isModelLoaded = false;
+    
+    // 모델 로드 시도
+    this.loadModel();
   }
 
-  // RAVDESS 파일명에서 감정 추출
-  parseRavdessFilename(filename) {
-    const parts = filename.replace('.wav', '').split('-');
-    if (parts.length >= 7) {
-      const emotionCode = parts[2];
-      return EMOTION_MAP[emotionCode] || 'unknown';
+  // JavaScript 기반 감정 분석 - 오디오 특징 추출
+  extractAudioFeatures(audioBuffer) {
+    if (!audioBuffer || audioBuffer.length === 0) {
+      return null;
     }
-    return 'unknown';
+
+    // 기본 오디오 특징 계산
+    const features = {
+      volume: this.calculateVolume(audioBuffer),
+      pitch: this.calculatePitch(audioBuffer),
+      speechRate: this.calculateSpeechRate(audioBuffer),
+      energy: this.calculateEnergy(audioBuffer),
+      zeroCrossingRate: this.calculateZeroCrossingRate(audioBuffer)
+    };
+
+    return features;
   }
 
-  // 음성 파일의 MFCC 특징 추출 (Python 스크립트 사용)
-  async extractMFCCFeatures(audioPath) {
+  // 볼륨 계산
+  calculateVolume(audioBuffer) {
+    const sum = audioBuffer.reduce((acc, sample) => acc + Math.abs(sample), 0);
+    return sum / audioBuffer.length;
+  }
+
+  // 피치 계산 (간단한 방법)
+  calculatePitch(audioBuffer) {
+    // 간단한 피치 추정 (실제로는 더 복잡한 알고리즘이 필요)
+    let crossings = 0;
+    for (let i = 1; i < audioBuffer.length; i++) {
+      if ((audioBuffer[i] >= 0 && audioBuffer[i-1] < 0) || 
+          (audioBuffer[i] < 0 && audioBuffer[i-1] >= 0)) {
+        crossings++;
+      }
+    }
+    return crossings / audioBuffer.length;
+  }
+
+  // 음성 속도 추정
+  calculateSpeechRate(audioBuffer) {
+    // 간단한 음성 활동 감지
+    let speechSegments = 0;
+    const threshold = 0.01;
+    
+    for (let i = 0; i < audioBuffer.length; i += 100) {
+      const segment = audioBuffer.slice(i, i + 100);
+      const segmentEnergy = this.calculateEnergy(segment);
+      if (segmentEnergy > threshold) {
+        speechSegments++;
+      }
+    }
+    
+    return speechSegments / (audioBuffer.length / 100);
+  }
+
+  // 에너지 계산
+  calculateEnergy(audioBuffer) {
+    const sum = audioBuffer.reduce((acc, sample) => acc + sample * sample, 0);
+    return Math.sqrt(sum / audioBuffer.length);
+  }
+
+  // 제로 크로싱 레이트 계산
+  calculateZeroCrossingRate(audioBuffer) {
+    let crossings = 0;
+    for (let i = 1; i < audioBuffer.length; i++) {
+      if ((audioBuffer[i] >= 0 && audioBuffer[i-1] < 0) || 
+          (audioBuffer[i] < 0 && audioBuffer[i-1] >= 0)) {
+        crossings++;
+      }
+    }
+    return crossings / audioBuffer.length;
+  }
+
+  // 규칙 기반 감정 분류
+  classifyEmotion(features) {
+    if (!features) {
+      return { emotion: 'neutral', confidence: 0.5 };
+    }
+
+    const { volume, pitch, speechRate, energy, zeroCrossingRate } = features;
+    
+    // 감정별 특징 패턴 정의
+    const emotionPatterns = {
+      happy: {
+        volume: { min: 0.3, max: 1.0 },
+        pitch: { min: 0.4, max: 1.0 },
+        speechRate: { min: 0.6, max: 1.0 },
+        energy: { min: 0.4, max: 1.0 }
+      },
+      sad: {
+        volume: { min: 0.0, max: 0.4 },
+        pitch: { min: 0.0, max: 0.3 },
+        speechRate: { min: 0.0, max: 0.4 },
+        energy: { min: 0.0, max: 0.3 }
+      },
+      angry: {
+        volume: { min: 0.6, max: 1.0 },
+        pitch: { min: 0.5, max: 1.0 },
+        speechRate: { min: 0.7, max: 1.0 },
+        energy: { min: 0.6, max: 1.0 }
+      },
+      calm: {
+        volume: { min: 0.1, max: 0.5 },
+        pitch: { min: 0.2, max: 0.6 },
+        speechRate: { min: 0.2, max: 0.6 },
+        energy: { min: 0.1, max: 0.4 }
+      },
+      fearful: {
+        volume: { min: 0.2, max: 0.6 },
+        pitch: { min: 0.3, max: 0.8 },
+        speechRate: { min: 0.4, max: 0.8 },
+        energy: { min: 0.2, max: 0.5 }
+      },
+      surprised: {
+        volume: { min: 0.5, max: 1.0 },
+        pitch: { min: 0.6, max: 1.0 },
+        speechRate: { min: 0.5, max: 1.0 },
+        energy: { min: 0.5, max: 1.0 }
+      },
+      disgust: {
+        volume: { min: 0.3, max: 0.7 },
+        pitch: { min: 0.2, max: 0.6 },
+        speechRate: { min: 0.3, max: 0.7 },
+        energy: { min: 0.3, max: 0.6 }
+      },
+      neutral: {
+        volume: { min: 0.2, max: 0.6 },
+        pitch: { min: 0.3, max: 0.7 },
+        speechRate: { min: 0.3, max: 0.7 },
+        energy: { min: 0.2, max: 0.5 }
+      }
+    };
+
+    // 각 감정에 대한 매칭 점수 계산
+    const scores = {};
+    
+    for (const [emotion, pattern] of Object.entries(emotionPatterns)) {
+      let score = 0;
+      let totalFeatures = 0;
+      
+      // 볼륨 매칭
+      if (volume >= pattern.volume.min && volume <= pattern.volume.max) {
+        score += 1;
+      }
+      totalFeatures++;
+      
+      // 피치 매칭
+      if (pitch >= pattern.pitch.min && pitch <= pattern.pitch.max) {
+        score += 1;
+      }
+      totalFeatures++;
+      
+      // 음성 속도 매칭
+      if (speechRate >= pattern.speechRate.min && speechRate <= pattern.speechRate.max) {
+        score += 1;
+      }
+      totalFeatures++;
+      
+      // 에너지 매칭
+      if (energy >= pattern.energy.min && energy <= pattern.energy.max) {
+        score += 1;
+      }
+      totalFeatures++;
+      
+      scores[emotion] = score / totalFeatures;
+    }
+
+    // 가장 높은 점수의 감정 찾기
+    let bestEmotion = 'neutral';
+    let bestScore = 0;
+    
+    for (const [emotion, score] of Object.entries(scores)) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestEmotion = emotion;
+      }
+    }
+
+    return {
+      emotion: bestEmotion,
+      confidence: bestScore
+    };
+  }
+
+  // 모델 로드
+  loadModel() {
+    try {
+      if (fs.existsSync(this.featurePath)) {
+        this.modelInfo = JSON.parse(fs.readFileSync(this.featurePath, 'utf8'));
+        log(`[감정분석] 모델 정보 로드됨: ${this.modelInfo.model_type}, 정확도: ${this.modelInfo.accuracy}`);
+        this.isModelLoaded = true;
+      } else {
+        log(`[감정분석] 모델 파일이 없습니다. 기본 규칙 기반 분석을 사용합니다.`);
+      }
+    } catch (error) {
+      log(`[감정분석] 모델 로드 실패: ${error.message}`);
+    }
+  }
+
+  // Python을 사용한 고급 특징 추출
+  async extractAdvancedFeatures(audioBuffer) {
     return new Promise((resolve, reject) => {
+      if (!this.isModelLoaded) {
+        resolve(null);
+        return;
+      }
+
       const pythonScript = `
 import librosa
 import numpy as np
 import json
 import sys
+import tempfile
+import os
 
-def extract_mfcc(audio_path):
+def extract_advanced_features(audio_data):
     try:
+        # 임시 파일로 저장
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = temp_file.name
+        
         # 오디오 로드
-        y, sr = librosa.load(audio_path, sr=22050)
+        y, sr = librosa.load(temp_path, sr=22050)
         
-        # MFCC 추출
+        # 고급 특징 추출
+        features = {}
+        
+        # MFCC 특징
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        features['mfcc_mean'] = np.mean(mfcc, axis=1).tolist()
+        features['mfcc_std'] = np.std(mfcc, axis=1).tolist()
         
-        # 통계적 특징 계산
-        mfcc_mean = np.mean(mfcc, axis=1)
-        mfcc_std = np.std(mfcc, axis=1)
+        # 스펙트럴 특징
+        spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
+        features['spectral_centroid_mean'] = float(np.mean(spectral_centroids))
+        features['spectral_centroid_std'] = float(np.std(spectral_centroids))
         
-        # 추가 특징들
-        spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-        spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
-        zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
+        spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
+        features['spectral_rolloff_mean'] = float(np.mean(spectral_rolloff))
+        features['spectral_rolloff_std'] = float(np.std(spectral_rolloff))
         
-        features = {
-            'mfcc_mean': mfcc_mean.tolist(),
-            'mfcc_std': mfcc_std.tolist(),
-            'spectral_centroid': float(spectral_centroid),
-            'spectral_rolloff': float(spectral_rolloff),
-            'zero_crossing_rate': float(zero_crossing_rate)
-        }
+        # 제로 크로싱 레이트
+        zero_crossing_rate = librosa.feature.zero_crossing_rate(y)
+        features['zero_crossing_rate_mean'] = float(np.mean(zero_crossing_rate))
+        features['zero_crossing_rate_std'] = float(np.std(zero_crossing_rate))
+        
+        # 리듬 특징
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        features['tempo'] = float(tempo)
+        
+        # 크로마 특징
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        features['chroma_mean'] = np.mean(chroma, axis=1).tolist()
+        features['chroma_std'] = np.std(chroma, axis=1).tolist()
+        
+        # 멜 스펙트로그램
+        mel_spectrogram = librosa.feature.melspectrogram(y=y, sr=sr)
+        features['mel_spectrogram_mean'] = float(np.mean(mel_spectrogram))
+        features['mel_spectrogram_std'] = float(np.std(mel_spectrogram))
+        
+        # RMS 에너지
+        rms = librosa.feature.rms(y=y)
+        features['rms_mean'] = float(np.mean(rms))
+        features['rms_std'] = float(np.std(rms))
+        
+        # 임시 파일 삭제
+        os.unlink(temp_path)
         
         print(json.dumps(features))
         
@@ -233,14 +456,22 @@ def extract_mfcc(audio_path):
         sys.exit(1)
 
 if __name__ == "__main__":
-    audio_path = sys.argv[1]
-    extract_mfcc(audio_path)
+    audio_data = sys.stdin.buffer.read()
+    extract_advanced_features(audio_data)
       `;
 
-      const tempScriptPath = path.join(__dirname, '../temp_mfcc_extractor.py');
+      const tempScriptPath = path.join(__dirname, '../temp_advanced_extractor.py');
       fs.writeFileSync(tempScriptPath, pythonScript);
 
-      exec(`python "${tempScriptPath}" "${audioPath}"`, (error, stdout, stderr) => {
+      // 오디오 데이터를 WAV 형식으로 변환
+      const wavBuffer = this.convertToWav(audioBuffer);
+      
+      // Python 스크립트 실행
+      const pythonPath = fs.existsSync(path.join(__dirname, '../venv/bin/python')) 
+        ? path.join(__dirname, '../venv/bin/python') 
+        : 'python3';
+      
+      const child = exec(`"${pythonPath}" "${tempScriptPath}"`, (error, stdout, stderr) => {
         try {
           fs.unlinkSync(tempScriptPath);
         } catch (e) {
@@ -248,197 +479,151 @@ if __name__ == "__main__":
         }
 
         if (error) {
-          log.error('MFCC 추출 실패:', error.message);
-          reject(error);
+          log(`[감정분석] 고급 특징 추출 실패: ${error.message}`);
+          resolve(null);
           return;
         }
 
         try {
           const features = JSON.parse(stdout);
           if (features.error) {
-            reject(new Error(features.error));
+            log(`[감정분석] 특징 추출 오류: ${features.error}`);
+            resolve(null);
             return;
           }
           resolve(features);
         } catch (e) {
-          reject(new Error('특징 파싱 실패: ' + e.message));
+          log(`[감정분석] 특징 파싱 실패: ${e.message}`);
+          resolve(null);
         }
       });
+
+      // 오디오 데이터를 stdin으로 전송
+      child.stdin.write(wavBuffer);
+      child.stdin.end();
     });
   }
 
-  // 간단한 감정 분류 (MFCC 특징 기반)
-  async classifyEmotion(features) {
-    // 실제 구현에서는 머신러닝 모델을 사용해야 하지만,
-    // 여기서는 간단한 규칙 기반 분류를 구현합니다.
+  // 오디오 버퍼를 WAV 형식으로 변환
+  convertToWav(audioBuffer) {
+    // 간단한 WAV 헤더 생성 (16kHz, 16bit, mono)
+    const sampleRate = 22050;
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    const blockAlign = numChannels * bitsPerSample / 8;
+    const dataSize = audioBuffer.length * 2;
+    const fileSize = 36 + dataSize;
     
-    const { spectral_centroid, spectral_rolloff, zero_crossing_rate } = features;
+    const buffer = Buffer.alloc(44 + dataSize);
     
-    // 스펙트럴 중심주파수가 높으면 활발한 감정 (happy, surprised, angry)
-    if (spectral_centroid > 2000) {
-      if (zero_crossing_rate > 0.1) {
-        return { emotion: 'happy', confidence: 0.7 };
-      } else {
-        return { emotion: 'surprised', confidence: 0.6 };
-      }
+    // WAV 헤더 작성
+    buffer.write('RIFF', 0);
+    buffer.writeUInt32LE(fileSize, 4);
+    buffer.write('WAVE', 8);
+    buffer.write('fmt ', 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(numChannels, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(byteRate, 28);
+    buffer.writeUInt16LE(blockAlign, 32);
+    buffer.writeUInt16LE(bitsPerSample, 34);
+    buffer.write('data', 36);
+    buffer.writeUInt32LE(dataSize, 40);
+    
+    // 오디오 데이터 작성
+    for (let i = 0; i < audioBuffer.length; i++) {
+      const sample = Math.max(-1, Math.min(1, audioBuffer[i]));
+      const intSample = Math.round(sample * 32767);
+      buffer.writeInt16LE(intSample, 44 + i * 2);
     }
     
-    // 스펙트럴 중심주파수가 낮으면 차분한 감정 (sad, calm, neutral)
-    if (spectral_centroid < 1000) {
-      if (zero_crossing_rate < 0.05) {
-        return { emotion: 'sad', confidence: 0.7 };
-      } else {
-        return { emotion: 'calm', confidence: 0.6 };
-      }
-    }
-    
-    // 중간 범위는 중립적
-    return { emotion: 'neutral', confidence: 0.5 };
+    return buffer;
   }
 
-  // 음성 파일에서 감정 분석
-  async analyzeEmotionFromAudio(audioPath) {
+  // 실시간 오디오 버퍼에서 감정 분석
+  async analyzeEmotionFromBuffer(audioBuffer) {
     try {
-      log.info('음성 감정 분석 시작:', audioPath);
+      let features = null;
       
-      // MFCC 특징 추출
-      const features = await this.extractMFCCFeatures(audioPath);
+      // 고급 특징 추출 시도 (Python 모델이 있는 경우)
+      if (this.isModelLoaded) {
+        features = await this.extractAdvancedFeatures(audioBuffer);
+      }
       
-      // 감정 분류
-      const result = await this.classifyEmotion(features);
+      // 고급 특징 추출이 실패하면 기본 특징 사용
+      if (!features) {
+        features = this.extractAudioFeatures(audioBuffer);
+      }
       
-      // 감정 히스토리 업데이트
+      if (!features) {
+        return { emotion: 'neutral', confidence: 0.5 };
+      }
+
+      const result = this.classifyEmotion(features);
+      
+      // 감정 히스토리에 추가
       this.emotionHistory.push({
         emotion: result.emotion,
         confidence: result.confidence,
         timestamp: Date.now()
       });
-      
-      // 최근 10개 감정만 유지
+
+      // 최근 10개만 유지
       if (this.emotionHistory.length > 10) {
-        this.emotionHistory = this.emotionHistory.slice(-10);
+        this.emotionHistory.shift();
       }
-      
+
       // 현재 감정 업데이트
       this.currentEmotion = result.emotion;
       this.emotionConfidence = result.confidence;
-      
-      log.info('감정 분석 완료:', result);
-      return result;
-      
-    } catch (error) {
-      log.error('감정 분석 실패:', error.message);
-      return { emotion: 'unknown', confidence: 0 };
-    }
-  }
 
-  // 실시간 음성 스트림에서 감정 분석
-  async analyzeEmotionFromStream(audioBuffer) {
-    try {
-      // 임시 파일로 저장
-      const tempPath = path.join(__dirname, '../temp_audio.wav');
-      fs.writeFileSync(tempPath, audioBuffer);
-      
-      const result = await this.analyzeEmotionFromAudio(tempPath);
-      
-      // 임시 파일 삭제
-      try {
-        fs.unlinkSync(tempPath);
-      } catch (e) {
-        // 파일 삭제 실패는 무시
-      }
+      log(`[감정분석] 감정: ${result.emotion}, 신뢰도: ${(result.confidence * 100).toFixed(1)}%`);
       
       return result;
     } catch (error) {
-      log.error('스트림 감정 분석 실패:', error.message);
-      return { emotion: 'unknown', confidence: 0 };
+      log(`[감정분석] 오류: ${error.message}`);
+      return { emotion: 'neutral', confidence: 0.5 };
     }
   }
 
-  // 감정에 따른 음악 추천
-  getMusicRecommendation(emotion) {
-    const recommendations = EMOTION_MUSIC_RECOMMENDATIONS[emotion] || EMOTION_MUSIC_RECOMMENDATIONS['neutral'];
-    const randomIndex = Math.floor(Math.random() * recommendations.length);
-    return recommendations[randomIndex];
-  }
+  // 감정 기반 추천 생성
+  generateEmotionRecommendations(emotion) {
+    const musicRecommendations = EMOTION_MUSIC_RECOMMENDATIONS[emotion] || EMOTION_MUSIC_RECOMMENDATIONS.neutral;
+    const messages = EMOTION_MESSAGES[emotion] || EMOTION_MESSAGES.neutral;
+    const activities = EMOTION_ACTIVITIES[emotion] || EMOTION_ACTIVITIES.neutral;
 
-  // 감정에 따른 메시지 추천
-  getEmotionMessage(emotion) {
-    const messages = EMOTION_MESSAGES[emotion] || EMOTION_MESSAGES['neutral'];
-    const randomIndex = Math.floor(Math.random() * messages.length);
-    return messages[randomIndex];
-  }
-
-  // 감정에 따른 활동 추천
-  getActivityRecommendation(emotion) {
-    const activities = EMOTION_ACTIVITIES[emotion] || EMOTION_ACTIVITIES['neutral'];
-    const randomIndex = Math.floor(Math.random() * activities.length);
-    return activities[randomIndex];
-  }
-
-  // 종합적인 감정 기반 추천
-  getEmotionBasedRecommendations(emotion) {
     return {
-      emotion: emotion,
-      music: this.getMusicRecommendation(emotion),
-      message: this.getEmotionMessage(emotion),
-      activity: this.getActivityRecommendation(emotion),
-      timestamp: Date.now()
+      music: musicRecommendations[Math.floor(Math.random() * musicRecommendations.length)],
+      message: messages[Math.floor(Math.random() * messages.length)],
+      activity: activities[Math.floor(Math.random() * activities.length)]
     };
   }
 
-  // 감정 변화 추적
-  getEmotionTrend() {
-    if (this.emotionHistory.length < 2) {
-      return { trend: 'stable', change: 0 };
-    }
-
-    const recent = this.emotionHistory.slice(-3);
-    const emotions = recent.map(e => e.emotion);
-    
-    // 감정 변화 분석
-    const uniqueEmotions = [...new Set(emotions)];
-    if (uniqueEmotions.length === 1) {
-      return { trend: 'stable', emotion: uniqueEmotions[0] };
-    } else if (uniqueEmotions.length > 1) {
-      return { trend: 'changing', from: emotions[0], to: emotions[emotions.length - 1] };
-    }
-    
-    return { trend: 'unknown' };
+  // 감정 히스토리 가져오기
+  getEmotionHistory() {
+    return this.emotionHistory;
   }
 
-  // 현재 감정 상태 가져오기
+  // 현재 감정 가져오기
   getCurrentEmotion() {
     return {
-      emotion: this.currentEmotion,
-      confidence: this.emotionConfidence,
-      history: this.emotionHistory.slice(-5), // 최근 5개
-      trend: this.getEmotionTrend()
+      emotion: this.currentEmotion || 'neutral',
+      confidence: this.emotionConfidence || 0.5
     };
   }
 
-  // 감정 기반 응답 생성
-  generateEmotionResponse(emotion, confidence) {
-    const recommendations = this.getEmotionBasedRecommendations(emotion);
-    
-    let response = '';
-    
-    if (confidence > 0.7) {
-      response = `${recommendations.message} `;
-      response += `지금은 ${recommendations.music}을 들으시면 좋을 것 같아요. `;
-      response += `${recommendations.activity}도 추천드려요.`;
-    } else if (confidence > 0.5) {
-      response = `${recommendations.message} `;
-      response += `기분 전환을 위해 ${recommendations.activity}는 어떠세요?`;
-    } else {
-      response = '음성을 잘 들을 수 없어서 정확한 감정을 파악하기 어려워요. ';
-      response += '다시 한 번 말씀해 주시겠어요?';
-    }
+  // 감정 분석 결과를 JSON으로 반환
+  getEmotionAnalysisResult() {
+    const current = this.getCurrentEmotion();
+    const recommendations = this.generateEmotionRecommendations(current.emotion);
     
     return {
-      response: response,
+      emotion: current.emotion,
+      confidence: current.confidence,
       recommendations: recommendations,
-      confidence: confidence
+      history: this.emotionHistory.slice(-5) // 최근 5개만
     };
   }
 }
