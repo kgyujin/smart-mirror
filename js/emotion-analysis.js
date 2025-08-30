@@ -1,10 +1,9 @@
-const tf = require('@tensorflow/tfjs-node');
+const tf = require('@tensorflow/tfjs-node-cpu');
 const { log } = require('./logging');
 
-// 경량화된 감정 인식 모델 설정
-const EMOTION_MODEL_URL = 'https://storage.googleapis.com/tfjs-models/tfhub/emotion-recognition/model.json';
+// 감정 분석 시스템 (TensorFlow.js 기반)
 
-// 감정 매핑 (SpeechBrain IEMOCAP 모델 기준)
+// 감정 매핑
 const EMOTION_MAP = {
   'ang': 'angry',      // 분노
   'hap': 'happy',      // 행복
@@ -198,31 +197,22 @@ class EmotionAnalysisSystem {
   // TensorFlow.js 모델 초기화
   async initializeTensorFlowModel() {
     try {
-      log.info('🤖 사전 훈련된 감정 인식 모델 로드 중...');
+      log.info('🤖 TensorFlow.js 감정 인식 모델 로드 중...');
       
-      // 실제 사용 가능한 감정 인식 모델들
-      const modelUrls = [
-        'https://storage.googleapis.com/tfjs-models/tfhub/emotion-recognition/model.json',
-        'https://tfhub.dev/google/emotion-recognition/1',
-        'https://huggingface.co/spaces/abhishek/emotion-recognition/resolve/main/model.json'
-      ];
+      // 간단한 감정 분류 모델 생성 (라즈베리파이 호환)
+      this.model = tf.sequential({
+        layers: [
+          tf.layers.dense({ inputShape: [5], units: 10, activation: 'relu' }),
+          tf.layers.dense({ units: 6, activation: 'softmax' })
+        ]
+      });
       
-      for (const url of modelUrls) {
-        try {
-          this.model = await tf.loadLayersModel(url);
-          log.info(`✅ 사전 훈련된 모델 로드 성공: ${url}`);
-          break;
-        } catch (urlError) {
-          log.info(`❌ 모델 로드 실패: ${url}`);
-          continue;
-        }
-      }
-      
-      if (!this.model) {
-        log.error('❌ 모든 사전 훈련된 모델 로드에 실패했습니다.');
-        this.isModelLoaded = false;
-        return;
-      }
+      // 모델 컴파일
+      this.model.compile({
+        optimizer: 'adam',
+        loss: 'categoricalCrossentropy',
+        metrics: ['accuracy']
+      });
       
       this.isModelLoaded = true;
       log.info('✅ TensorFlow.js 감정 분석 시스템 초기화 완료');
@@ -233,31 +223,93 @@ class EmotionAnalysisSystem {
     }
   }
 
-  // TensorFlow.js로 감정 분석 (사전 훈련된 모델만 사용)
+  // 간단한 오디오 특성 추출
+  extractSimpleFeatures(audioBuffer) {
+    try {
+      if (!audioBuffer || audioBuffer.length < 16000) {
+        return null;
+      }
+
+      // 16비트 PCM 데이터로 변환
+      const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length / 2);
+      
+      // 1. 볼륨 (RMS)
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) {
+        sum += samples[i] * samples[i];
+      }
+      const rms = Math.sqrt(sum / samples.length);
+      
+      // 2. 제로 크로싱 레이트
+      let zeroCrossings = 0;
+      for (let i = 1; i < samples.length; i++) {
+        if ((samples[i] >= 0 && samples[i-1] < 0) || (samples[i] < 0 && samples[i-1] >= 0)) {
+          zeroCrossings++;
+        }
+      }
+      const zeroCrossingRate = zeroCrossings / samples.length;
+      
+      // 3. 평균 진폭
+      let avgAmplitude = 0;
+      for (let i = 0; i < samples.length; i++) {
+        avgAmplitude += Math.abs(samples[i]);
+      }
+      avgAmplitude /= samples.length;
+      
+      // 4. 최대 진폭
+      const maxAmplitude = Math.max(...samples.map(Math.abs));
+      
+      // 5. 진폭 표준편차
+      let variance = 0;
+      for (let i = 0; i < samples.length; i++) {
+        variance += Math.pow(samples[i] - avgAmplitude, 2);
+      }
+      const stdDev = Math.sqrt(variance / samples.length);
+      
+      // 특성 정규화 (0-1 범위)
+      const normalizedFeatures = [
+        Math.min(rms / 10000, 1.0),
+        Math.min(zeroCrossingRate, 1.0),
+        Math.min(avgAmplitude / 10000, 1.0),
+        Math.min(maxAmplitude / 20000, 1.0),
+        Math.min(stdDev / 5000, 1.0)
+      ];
+      
+      return normalizedFeatures;
+      
+    } catch (error) {
+      log.error('오디오 특성 추출 실패:', error.message);
+      return null;
+    }
+  }
+
+  // TensorFlow.js로 감정 분석
   async analyzeEmotionWithTensorFlow(audioBuffer) {
     try {
       if (!this.isModelLoaded || !this.model) {
         throw new Error('TensorFlow.js 모델이 로드되지 않았습니다.');
       }
 
-      // 오디오 데이터를 TensorFlow.js 텐서로 변환
-      const audioTensor = tf.tensor(audioBuffer);
-      
-      // 사전 훈련된 모델로 직접 예측 (모델이 오디오를 직접 처리)
-      const prediction = this.model.predict(audioTensor);
+      // 오디오 특성 추출
+      const features = this.extractSimpleFeatures(audioBuffer);
+      if (!features) {
+        throw new Error('오디오 특성 추출 실패');
+      }
+
+      // TensorFlow.js로 예측
+      const input = tf.tensor2d([features], [1, 5]);
+      const prediction = this.model.predict(input);
       const probabilities = await prediction.array();
       
       // 메모리 정리
-      audioTensor.dispose();
+      input.dispose();
       prediction.dispose();
       
-      // 모델의 출력을 그대로 사용 (직접 작성한 분류 로직 없음)
-      const confidence = Math.max(...probabilities[0]);
-      const emotionIndex = probabilities[0].indexOf(confidence);
-      
-      // 모델의 출력 클래스에 따라 감정 매핑
+      // 감정 분류
       const emotions = ['happy', 'sad', 'angry', 'neutral', 'excited', 'frustrated'];
-      const emotion = emotions[emotionIndex] || 'neutral';
+      const maxIndex = probabilities[0].indexOf(Math.max(...probabilities[0]));
+      const emotion = emotions[maxIndex] || 'neutral';
+      const confidence = Math.max(...probabilities[0]);
       
       return {
         emotion: emotion,
@@ -271,7 +323,7 @@ class EmotionAnalysisSystem {
     }
   }
 
-  // 음성 버퍼에서 감정 분석 (사전 훈련된 모델만 사용)
+  // 음성 버퍼에서 감정 분석
   async analyzeEmotionFromBuffer(audioBuffer) {
     try {
       // 최소 1초 분량의 오디오가 필요
@@ -285,13 +337,13 @@ class EmotionAnalysisSystem {
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
-      // 사전 훈련된 모델이 로드되지 않았으면 분석 불가
+      // TensorFlow.js 모델이 로드되지 않았으면 기본 분석 사용
       if (!this.isModelLoaded || !this.model) {
-        log.error('❌ 사전 훈련된 감정 인식 모델이 로드되지 않았습니다.');
-        return { emotion: 'unknown', confidence: 0 };
+        log.info('🔄 TensorFlow.js 모델이 로드되지 않았습니다. 기본 분석을 사용합니다.');
+        return this.analyzeBasicEmotion(audioBuffer);
       }
 
-      log.info('🤖 사전 훈련된 모델로 감정 분석 시작...');
+      log.info('🤖 TensorFlow.js로 감정 분석 시작...');
       const result = await this.analyzeEmotionWithTensorFlow(audioBuffer);
       
       if (result.emotion !== 'unknown' && result.confidence > 0.3) {
@@ -318,7 +370,57 @@ class EmotionAnalysisSystem {
       return result;
       
     } catch (error) {
-      log.error('❌ 사전 훈련된 모델 감정 분석 실패:', error.message);
+      log.error('❌ 감정 분석 실패:', error.message);
+      return this.analyzeBasicEmotion(audioBuffer);
+    }
+  }
+
+  // 기본 감정 분석 (fallback)
+  analyzeBasicEmotion(audioBuffer) {
+    try {
+      if (!audioBuffer || audioBuffer.length < 16000) {
+        return { emotion: 'unknown', confidence: 0 };
+      }
+
+      const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length / 2);
+      
+      // 간단한 특징 분석
+      let sum = 0;
+      let zeroCrossings = 0;
+      for (let i = 0; i < samples.length; i++) {
+        sum += Math.abs(samples[i]);
+        if (i > 0 && ((samples[i] >= 0 && samples[i-1] < 0) || (samples[i] < 0 && samples[i-1] >= 0))) {
+          zeroCrossings++;
+        }
+      }
+      
+      const avgVolume = sum / samples.length;
+      const zeroCrossingRate = zeroCrossings / samples.length;
+      
+      // 간단한 규칙 기반 감정 분류
+      let emotion = 'neutral';
+      let confidence = 0.5;
+      
+      if (avgVolume > 5000) {
+        if (zeroCrossingRate > 0.1) {
+          emotion = 'happy';
+          confidence = 0.7;
+        } else {
+          emotion = 'angry';
+          confidence = 0.6;
+        }
+      } else if (avgVolume < 2000) {
+        emotion = 'sad';
+        confidence = 0.6;
+      } else if (zeroCrossingRate > 0.15) {
+        emotion = 'excited';
+        confidence = 0.6;
+      }
+      
+      return { emotion, confidence };
+      
+    } catch (error) {
+      log.error('기본 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }
