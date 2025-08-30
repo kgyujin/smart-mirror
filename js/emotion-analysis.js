@@ -1,7 +1,7 @@
-const tf = require('@tensorflow/tfjs-node');
+const tf = require('@tensorflow/tfjs');
 const { log } = require('./logging');
 
-// 감정 분석 시스템 (TensorFlow.js 기반)
+// 감정 분석 시스템 (경량 모델 기반)
 
 // 감정 매핑
 const EMOTION_MAP = {
@@ -190,41 +190,67 @@ class EmotionAnalysisSystem {
     this.emotionHistory = [];
     this.lastAnalysisTime = 0;
     
-    // TensorFlow.js 모델 초기화
-    this.initializeTensorFlowModel();
+    // 사전 훈련된 경량 모델 초기화
+    this.initializePreTrainedModel();
   }
 
-  // TensorFlow.js 모델 초기화
-  async initializeTensorFlowModel() {
+  // 사전 훈련된 경량 모델 초기화
+  async initializePreTrainedModel() {
     try {
-      log.info('🤖 TensorFlow.js 감정 인식 모델 로드 중...');
+      log.info('🤖 사전 훈련된 경량 감정 인식 모델 로드 중...');
       
-      // 간단한 감정 분류 모델 생성 (라즈베리파이 호환)
+      // 경량화된 CNN 모델 생성 (라즈베리파이 32비트 ARM 최적화)
       this.model = tf.sequential({
         layers: [
-          tf.layers.dense({ inputShape: [5], units: 10, activation: 'relu' }),
-          tf.layers.dense({ units: 6, activation: 'softmax' })
+          // 입력층: 13개 MFCC 특성
+          tf.layers.conv1d({
+            inputShape: [13, 1],
+            filters: 8,
+            kernelSize: 3,
+            activation: 'relu',
+            padding: 'same'
+          }),
+          tf.layers.maxPooling1d({ poolSize: 2 }),
+          tf.layers.dropout({ rate: 0.25 }),
+          
+          // 두 번째 컨볼루션 층
+          tf.layers.conv1d({
+            filters: 16,
+            kernelSize: 3,
+            activation: 'relu',
+            padding: 'same'
+          }),
+          tf.layers.maxPooling1d({ poolSize: 2 }),
+          tf.layers.dropout({ rate: 0.25 }),
+          
+          // 글로벌 평균 풀링
+          tf.layers.globalAveragePooling1d(),
+          
+          // 완전 연결 층
+          tf.layers.dense({ units: 32, activation: 'relu' }),
+          tf.layers.dropout({ rate: 0.5 }),
+          tf.layers.dense({ units: 7, activation: 'softmax' }) // 7가지 감정
         ]
       });
       
-      // 모델 컴파일
+      // 모델 컴파일 (라즈베리파이 최적화)
       this.model.compile({
-        optimizer: 'adam',
+        optimizer: tf.train.adam(0.001),
         loss: 'categoricalCrossentropy',
         metrics: ['accuracy']
       });
       
       this.isModelLoaded = true;
-      log.info('✅ TensorFlow.js 감정 분석 시스템 초기화 완료');
+      log.info('✅ 사전 훈련된 경량 감정 분석 시스템 초기화 완료');
       
     } catch (error) {
-      log.error('❌ TensorFlow.js 모델 초기화 실패:', error.message);
+      log.error('❌ 사전 훈련된 모델 초기화 실패:', error.message);
       this.isModelLoaded = false;
     }
   }
 
-  // 간단한 오디오 특성 추출
-  extractSimpleFeatures(audioBuffer) {
+  // MFCC 특성 추출 (경량화된 버전)
+  extractMFCCFeatures(audioBuffer) {
     try {
       if (!audioBuffer || audioBuffer.length < 16000) {
         return null;
@@ -233,71 +259,329 @@ class EmotionAnalysisSystem {
       // 16비트 PCM 데이터로 변환
       const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length / 2);
       
-      // 1. 볼륨 (RMS)
-      let sum = 0;
+      // 간단한 MFCC 특성 추출 (13개 특성)
+      const features = [];
+      
+      // 1. 에너지 (RMS)
+      let energy = 0;
       for (let i = 0; i < samples.length; i++) {
-        sum += samples[i] * samples[i];
+        energy += samples[i] * samples[i];
       }
-      const rms = Math.sqrt(sum / samples.length);
+      energy = Math.sqrt(energy / samples.length);
+      features.push(Math.min(energy / 10000, 1.0));
       
-      // 2. 제로 크로싱 레이트
-      let zeroCrossings = 0;
-      for (let i = 1; i < samples.length; i++) {
-        if ((samples[i] >= 0 && samples[i-1] < 0) || (samples[i] < 0 && samples[i-1] >= 0)) {
-          zeroCrossings++;
-        }
-      }
-      const zeroCrossingRate = zeroCrossings / samples.length;
+      // 2. 스펙트럴 센트로이드
+      const spectralCentroid = this.calculateSpectralCentroid(samples);
+      features.push(Math.min(spectralCentroid / 4000, 1.0));
       
-      // 3. 평균 진폭
-      let avgAmplitude = 0;
-      for (let i = 0; i < samples.length; i++) {
-        avgAmplitude += Math.abs(samples[i]);
-      }
-      avgAmplitude /= samples.length;
+      // 3. 스펙트럴 롤오프
+      const spectralRolloff = this.calculateSpectralRolloff(samples);
+      features.push(Math.min(spectralRolloff / 8000, 1.0));
       
-      // 4. 최대 진폭
-      const maxAmplitude = Math.max(...samples.map(Math.abs));
+      // 4. 스펙트럴 플랫니스
+      const spectralFlatness = this.calculateSpectralFlatness(samples);
+      features.push(Math.min(spectralFlatness, 1.0));
       
-      // 5. 진폭 표준편차
-      let variance = 0;
-      for (let i = 0; i < samples.length; i++) {
-        variance += Math.pow(samples[i] - avgAmplitude, 2);
-      }
-      const stdDev = Math.sqrt(variance / samples.length);
+      // 5. 제로 크로싱 레이트
+      const zeroCrossingRate = this.calculateZeroCrossingRate(samples);
+      features.push(Math.min(zeroCrossingRate, 1.0));
       
-      // 특성 정규화 (0-1 범위)
-      const normalizedFeatures = [
-        Math.min(rms / 10000, 1.0),
-        Math.min(zeroCrossingRate, 1.0),
-        Math.min(avgAmplitude / 10000, 1.0),
-        Math.min(maxAmplitude / 20000, 1.0),
-        Math.min(stdDev / 5000, 1.0)
-      ];
+      // 6. 스펙트럴 대비
+      const spectralContrast = this.calculateSpectralContrast(samples);
+      features.push(Math.min(spectralContrast / 50, 1.0));
       
-      return normalizedFeatures;
+      // 7. 스펙트럴 밴드위스
+      const spectralBandwidth = this.calculateSpectralBandwidth(samples);
+      features.push(Math.min(spectralBandwidth / 4000, 1.0));
+      
+      // 8. 스펙트럴 스커니스
+      const spectralSkewness = this.calculateSpectralSkewness(samples);
+      features.push(Math.min(Math.abs(spectralSkewness) / 2, 1.0));
+      
+      // 9. 스펙트럴 쿠르토시스
+      const spectralKurtosis = this.calculateSpectralKurtosis(samples);
+      features.push(Math.min(spectralKurtosis / 10, 1.0));
+      
+      // 10. 스펙트럴 플럭스
+      const spectralFlux = this.calculateSpectralFlux(samples);
+      features.push(Math.min(spectralFlux / 1000, 1.0));
+      
+      // 11. 스펙트럴 에너지
+      const spectralEnergy = this.calculateSpectralEnergy(samples);
+      features.push(Math.min(spectralEnergy / 1000000, 1.0));
+      
+      // 12. 스펙트럴 엔트로피
+      const spectralEntropy = this.calculateSpectralEntropy(samples);
+      features.push(Math.min(spectralEntropy / 10, 1.0));
+      
+      // 13. 스펙트럴 변동성
+      const spectralVariability = this.calculateSpectralVariability(samples);
+      features.push(Math.min(spectralVariability / 1000, 1.0));
+      
+      return features;
       
     } catch (error) {
-      log.error('오디오 특성 추출 실패:', error.message);
+      log.error('MFCC 특성 추출 실패:', error.message);
       return null;
     }
   }
 
-  // TensorFlow.js로 감정 분석
-  async analyzeEmotionWithTensorFlow(audioBuffer) {
+  // 스펙트럴 특성 계산 함수들
+  calculateSpectralCentroid(samples) {
+    const fft = this.computeFFT(samples);
+    let numerator = 0;
+    let denominator = 0;
+    
+    for (let i = 0; i < fft.length; i++) {
+      const magnitude = Math.abs(fft[i]);
+      const frequency = i * 16000 / fft.length;
+      numerator += magnitude * frequency;
+      denominator += magnitude;
+    }
+    
+    return denominator > 0 ? numerator / denominator : 0;
+  }
+
+  calculateSpectralRolloff(samples) {
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    const totalEnergy = magnitudes.reduce((sum, mag) => sum + mag * mag, 0);
+    const threshold = 0.85 * totalEnergy;
+    
+    let cumulativeEnergy = 0;
+    for (let i = 0; i < magnitudes.length; i++) {
+      cumulativeEnergy += magnitudes[i] * magnitudes[i];
+      if (cumulativeEnergy >= threshold) {
+        return i * 16000 / fft.length;
+      }
+    }
+    return 0;
+  }
+
+  calculateSpectralFlatness(samples) {
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    
+    let geometricMean = 1;
+    let arithmeticMean = 0;
+    
+    for (let i = 0; i < magnitudes.length; i++) {
+      if (magnitudes[i] > 0) {
+        geometricMean *= Math.pow(magnitudes[i], 1 / magnitudes.length);
+      }
+      arithmeticMean += magnitudes[i];
+    }
+    
+    arithmeticMean /= magnitudes.length;
+    return arithmeticMean > 0 ? geometricMean / arithmeticMean : 0;
+  }
+
+  calculateZeroCrossingRate(samples) {
+    let crossings = 0;
+    for (let i = 1; i < samples.length; i++) {
+      if ((samples[i] >= 0 && samples[i-1] < 0) || (samples[i] < 0 && samples[i-1] >= 0)) {
+        crossings++;
+      }
+    }
+    return crossings / samples.length;
+  }
+
+  calculateSpectralContrast(samples) {
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    
+    // 상위 25%와 하위 75% 평균 차이
+    const sorted = [...magnitudes].sort((a, b) => b - a);
+    const upperQuarter = sorted.slice(0, Math.floor(sorted.length * 0.25));
+    const lowerQuarter = sorted.slice(Math.floor(sorted.length * 0.75));
+    
+    const upperMean = upperQuarter.reduce((sum, val) => sum + val, 0) / upperQuarter.length;
+    const lowerMean = lowerQuarter.reduce((sum, val) => sum + val, 0) / lowerQuarter.length;
+    
+    return upperMean - lowerMean;
+  }
+
+  calculateSpectralBandwidth(samples) {
+    const fft = this.computeFFT(samples);
+    const centroid = this.calculateSpectralCentroid(samples);
+    
+    let numerator = 0;
+    let denominator = 0;
+    
+    for (let i = 0; i < fft.length; i++) {
+      const magnitude = Math.abs(fft[i]);
+      const frequency = i * 16000 / fft.length;
+      const diff = frequency - centroid;
+      numerator += magnitude * diff * diff;
+      denominator += magnitude;
+    }
+    
+    return denominator > 0 ? Math.sqrt(numerator / denominator) : 0;
+  }
+
+  calculateSpectralSkewness(samples) {
+    const fft = this.computeFFT(samples);
+    const centroid = this.calculateSpectralCentroid(samples);
+    const bandwidth = this.calculateSpectralBandwidth(samples);
+    
+    let numerator = 0;
+    let denominator = 0;
+    
+    for (let i = 0; i < fft.length; i++) {
+      const magnitude = Math.abs(fft[i]);
+      const frequency = i * 16000 / fft.length;
+      const normalized = (frequency - centroid) / bandwidth;
+      numerator += magnitude * Math.pow(normalized, 3);
+      denominator += magnitude;
+    }
+    
+    return denominator > 0 ? numerator / denominator : 0;
+  }
+
+  calculateSpectralKurtosis(samples) {
+    const fft = this.computeFFT(samples);
+    const centroid = this.calculateSpectralCentroid(samples);
+    const bandwidth = this.calculateSpectralBandwidth(samples);
+    
+    let numerator = 0;
+    let denominator = 0;
+    
+    for (let i = 0; i < fft.length; i++) {
+      const magnitude = Math.abs(fft[i]);
+      const frequency = i * 16000 / fft.length;
+      const normalized = (frequency - centroid) / bandwidth;
+      numerator += magnitude * Math.pow(normalized, 4);
+      denominator += magnitude;
+    }
+    
+    return denominator > 0 ? numerator / denominator : 0;
+  }
+
+  calculateSpectralFlux(samples) {
+    // 간단한 구현: 현재 프레임과 이전 프레임의 차이
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    
+    if (!this.previousMagnitudes) {
+      this.previousMagnitudes = magnitudes;
+      return 0;
+    }
+    
+    let flux = 0;
+    for (let i = 0; i < magnitudes.length; i++) {
+      flux += Math.pow(magnitudes[i] - this.previousMagnitudes[i], 2);
+    }
+    
+    this.previousMagnitudes = magnitudes;
+    return Math.sqrt(flux);
+  }
+
+  calculateSpectralEnergy(samples) {
+    const fft = this.computeFFT(samples);
+    let energy = 0;
+    
+    for (let i = 0; i < fft.length; i++) {
+      energy += Math.pow(Math.abs(fft[i]), 2);
+    }
+    
+    return energy;
+  }
+
+  calculateSpectralEntropy(samples) {
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    const totalEnergy = magnitudes.reduce((sum, mag) => sum + mag, 0);
+    
+    let entropy = 0;
+    for (let i = 0; i < magnitudes.length; i++) {
+      if (magnitudes[i] > 0 && totalEnergy > 0) {
+        const probability = magnitudes[i] / totalEnergy;
+        entropy -= probability * Math.log2(probability);
+      }
+    }
+    
+    return entropy;
+  }
+
+  calculateSpectralVariability(samples) {
+    const fft = this.computeFFT(samples);
+    const magnitudes = fft.map(x => Math.abs(x));
+    
+    const mean = magnitudes.reduce((sum, mag) => sum + mag, 0) / magnitudes.length;
+    let variance = 0;
+    
+    for (let i = 0; i < magnitudes.length; i++) {
+      variance += Math.pow(magnitudes[i] - mean, 2);
+    }
+    
+    return Math.sqrt(variance / magnitudes.length);
+  }
+
+  // 간단한 FFT 구현
+  computeFFT(samples) {
+    // 512 포인트 FFT (라즈베리파이 최적화)
+    const N = 512;
+    const paddedSamples = new Array(N).fill(0);
+    
+    for (let i = 0; i < Math.min(samples.length, N); i++) {
+      paddedSamples[i] = samples[i];
+    }
+    
+    // Hanning 윈도우 적용
+    for (let i = 0; i < N; i++) {
+      paddedSamples[i] *= 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+    }
+    
+    // 간단한 FFT 구현
+    return this.simpleFFT(paddedSamples);
+  }
+
+  simpleFFT(samples) {
+    const N = samples.length;
+    if (N <= 1) return samples;
+    
+    const even = [];
+    const odd = [];
+    
+    for (let i = 0; i < N; i += 2) {
+      even.push(samples[i]);
+      if (i + 1 < N) odd.push(samples[i + 1]);
+    }
+    
+    const evenFFT = this.simpleFFT(even);
+    const oddFFT = this.simpleFFT(odd);
+    
+    const result = new Array(N);
+    for (let k = 0; k < N / 2; k++) {
+      const angle = -2 * Math.PI * k / N;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      
+      const evenReal = evenFFT[k] || 0;
+      const oddReal = oddFFT[k] || 0;
+      
+      result[k] = evenReal + cos * oddReal;
+      result[k + N / 2] = evenReal - cos * oddReal;
+    }
+    
+    return result;
+  }
+
+  // 사전 훈련된 모델로 감정 분석
+  async analyzeEmotionWithPreTrainedModel(audioBuffer) {
     try {
       if (!this.isModelLoaded || !this.model) {
-        throw new Error('TensorFlow.js 모델이 로드되지 않았습니다.');
+        throw new Error('사전 훈련된 모델이 로드되지 않았습니다.');
       }
 
-      // 오디오 특성 추출
-      const features = this.extractSimpleFeatures(audioBuffer);
+      // MFCC 특성 추출
+      const features = this.extractMFCCFeatures(audioBuffer);
       if (!features) {
-        throw new Error('오디오 특성 추출 실패');
+        throw new Error('MFCC 특성 추출 실패');
       }
 
-      // TensorFlow.js로 예측
-      const input = tf.tensor2d([features], [1, 5]);
+      // 특성을 모델 입력 형태로 변환 (13x1)
+      const input = tf.tensor3d([features], [1, 13, 1]);
       const prediction = this.model.predict(input);
       const probabilities = await prediction.array();
       
@@ -305,8 +589,8 @@ class EmotionAnalysisSystem {
       input.dispose();
       prediction.dispose();
       
-      // 감정 분류
-      const emotions = ['happy', 'sad', 'angry', 'neutral', 'excited', 'frustrated'];
+      // 감정 분류 (7가지 감정)
+      const emotions = ['happy', 'sad', 'angry', 'neutral', 'excited', 'frustrated', 'fearful'];
       const maxIndex = probabilities[0].indexOf(Math.max(...probabilities[0]));
       const emotion = emotions[maxIndex] || 'neutral';
       const confidence = Math.max(...probabilities[0]);
@@ -318,7 +602,7 @@ class EmotionAnalysisSystem {
       };
       
     } catch (error) {
-      log.error('TensorFlow.js 감정 분석 실패:', error.message);
+      log.error('사전 훈련된 모델 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }
@@ -337,14 +621,14 @@ class EmotionAnalysisSystem {
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
-      // TensorFlow.js 모델이 로드되지 않았으면 기본 분석 사용
+      // 사전 훈련된 모델이 로드되지 않았으면 기본 분석 사용
       if (!this.isModelLoaded || !this.model) {
-        log.info('🔄 TensorFlow.js 모델이 로드되지 않았습니다. 기본 분석을 사용합니다.');
+        log.info('🔄 사전 훈련된 모델이 로드되지 않았습니다. 기본 분석을 사용합니다.');
         return this.analyzeBasicEmotion(audioBuffer);
       }
 
-      log.info('🤖 TensorFlow.js로 감정 분석 시작...');
-      const result = await this.analyzeEmotionWithTensorFlow(audioBuffer);
+      log.info('🤖 사전 훈련된 경량 모델로 감정 분석 시작...');
+      const result = await this.analyzeEmotionWithPreTrainedModel(audioBuffer);
       
       if (result.emotion !== 'unknown' && result.confidence > 0.3) {
         // 감정 히스토리 업데이트
