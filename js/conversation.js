@@ -572,6 +572,104 @@ const analyzeActionIntent = (userText, contextSummary) => {
   return { type: 'general', confidence: 0.5 };
 };
 
+// 질문 분류 함수 (GPT 기반)
+const classifyUserQuestion = async (userText, openai) => {
+  try {
+    if (!openai) return { type: 'general', confidence: 0.5 };
+
+    const systemPrompt = `사용자의 질문을 다음 카테고리 중 하나로 분류해주세요:
+
+1. weather - 날씨 관련 질문 (비, 눈, 온도, 날씨 등)
+2. time - 시간 관련 질문 (몇 시, 현재 시간 등)
+3. date - 날짜/요일 관련 질문 (오늘, 내일, 요일 등)
+4. schedule - 일정 관련 질문 (일정, 스케줄, 미팅, 약속 등)
+5. news - 뉴스 관련 질문
+6. emotion - 감정 표현 (짜증, 화남, 기쁨, 슬픔 등)
+7. music - 음악 관련 질문
+8. action - 액션 요청 (등록, 추가, 알림 등)
+9. general - 일반적인 대화
+
+JSON 형태로 응답해주세요: {"type": "카테고리", "confidence": 0.0-1.0}`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userText }
+      ],
+      temperature: 0.1,
+      max_tokens: 100,
+    });
+
+    const response = completion.choices?.[0]?.message?.content?.trim();
+    if (response) {
+      try {
+        const result = JSON.parse(response);
+        return result;
+      } catch (e) {
+        log.warn('질문 분류 JSON 파싱 실패:', e.message);
+      }
+    }
+  } catch (error) {
+    log.warn('질문 분류 실패:', error.message);
+  }
+
+  // 기본 분류 (GPT 실패 시)
+  const lowerText = userText.toLowerCase();
+  if (/(날씨|비|눈|온도|더워|추워|우산)/.test(lowerText)) return { type: 'weather', confidence: 0.8 };
+  if (/(몇\s*시|현재\s*시간|지금\s*시간|time)/.test(lowerText)) return { type: 'time', confidence: 0.9 };
+  if (/(오늘|내일|모레|요일|날짜)/.test(lowerText)) return { type: 'date', confidence: 0.7 };
+  if (/(일정|스케줄|미팅|약속|회의)/.test(lowerText)) return { type: 'schedule', confidence: 0.8 };
+  if (/뉴스/.test(lowerText)) return { type: 'news', confidence: 0.9 };
+  if (/(짜증|화남|기쁨|슬픔|화나|짜증나|스트레스)/.test(lowerText)) return { type: 'emotion', confidence: 0.8 };
+  if (/(음악|노래|플레이리스트)/.test(lowerText)) return { type: 'music', confidence: 0.8 };
+  if (/(등록|추가|알림|리마인더)/.test(lowerText)) return { type: 'action', confidence: 0.8 };
+  
+  return { type: 'general', confidence: 0.5 };
+};
+
+// 감정 기반 응답 추가 함수
+const addEmotionBasedResponse = (baseReply, currentEmotion) => {
+  if (!currentEmotion || !currentEmotion.emotion || currentEmotion.confidence < 0.4) {
+    return baseReply;
+  }
+
+  const emotion = currentEmotion.emotion;
+  const confidence = currentEmotion.confidence;
+
+  // 감정별 추가 응답
+  const emotionAdditions = {
+    'angry': [
+      ' 혹시 무슨 일 있으세요? 괜찮으신가요?',
+      ' 심호흡을 하면 감정을 다루는 데 도움이 됩니다.',
+      ' 잠시 쉬어가시는 건 어떨까요?'
+    ],
+    'frustrated': [
+      ' 답답한 일이 있으신가요?',
+      ' 차분히 생각해보면 해결책이 보일 거예요.',
+      ' 잠시 다른 일에 집중해보세요.'
+    ],
+    'sad': [
+      ' 슬픈 일이 있으신가요?',
+      ' 따뜻한 차 한 잔 마시는 건 어떨까요?',
+      ' 혼자가 아니에요. 언제든 이야기해주세요.'
+    ],
+    'fearful': [
+      ' 불안한 일이 있으신가요?',
+      ' 안전한 곳에 계시니 걱정하지 마세요.',
+      ' 차분히 생각해보세요.'
+    ]
+  };
+
+  const additions = emotionAdditions[emotion];
+  if (additions && confidence > 0.5) {
+    const randomAddition = additions[Math.floor(Math.random() * additions.length)];
+    return baseReply + randomAddition;
+  }
+
+  return baseReply;
+};
+
 // 메인 대화 처리 함수
 const processRecognizedCommand = async (text, dependencies) => {
   const {
@@ -608,67 +706,62 @@ const processRecognizedCommand = async (text, dependencies) => {
       if (currentEmotion.emotion && currentEmotion.confidence > 0.3) {
         // 감정 히스토리에 추가
         conversationContext.addEmotionHistory(userId, currentEmotion.emotion, currentEmotion.confidence);
+        log.info(`감정 감지: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
       }
     }
     
-    // 1. 뉴스 관련 질문
-    if (/뉴스/.test(trimmed)) {
-      try {
-        const newsRes = await processNewsQuery(trimmed);
-        reply = newsRes.response || '뉴스 정보를 불러올 수 없습니다.';
-      } catch {
-        reply = '뉴스 정보를 가져오는 데 실패했습니다.';
-      }
-    }
-    // 2. 날씨 관련 질문
-    else if (/날씨/.test(trimmed)) {
-      try {
-        const weatherData = await fetchWeatherData();
-        reply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
-      } catch {
-        reply = '날씨 정보를 불러오지 못했습니다.';
-      }
-    }
-    // 3. 시간 질문
-    else if (/(몇\s*시|현재\s*시간|지금\s*시간|time)/i.test(trimmed)) {
-      reply = `현재 시각은 ${formatKSTTime()}입니다.`;
-    }
-    // 4. 날짜/요일/일정 관련 질문 (상대적 날짜 처리 포함)
-    else if (isPureDateQuery(trimmed)) {
-      try {
-        // 상대적 날짜 파싱
-        const dateInfo = parseRelativeDate(trimmed);
-        const lowerQuery = trimmed.toLowerCase();
+    // 1단계: GPT로 질문 분류
+    const questionClassification = await classifyUserQuestion(trimmed, openai);
+    log.info(`질문 분류: ${questionClassification.type} (신뢰도: ${(questionClassification.confidence * 100).toFixed(1)}%)`);
+    
+    // 2단계: 분류에 따른 처리
+    switch (questionClassification.type) {
+      case 'weather':
+        try {
+          const weatherData = await fetchWeatherData();
+          let weatherReply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
+          reply = addEmotionBasedResponse(weatherReply, currentEmotion);
+        } catch {
+          reply = addEmotionBasedResponse('날씨 정보를 불러오지 못했습니다.', currentEmotion);
+        }
+        break;
         
-        // 요일 질문인 경우
-        if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
-          const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
-          reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`;
+      case 'time':
+        let timeReply = `현재 시각은 ${formatKSTTime()}입니다.`;
+        reply = addEmotionBasedResponse(timeReply, currentEmotion);
+        break;
+        
+      case 'date':
+        try {
+          const dateInfo = parseRelativeDate(trimmed);
+          const lowerQuery = trimmed.toLowerCase();
+          
+          if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
+            const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
+            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`, currentEmotion);
+          } else {
+            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo)}입니다.`, currentEmotion);
+          }
+        } catch (error) {
+          log.error('날짜 처리 실패:', error.message);
+          reply = addEmotionBasedResponse('날짜 정보를 처리하는 데 실패했습니다.', currentEmotion);
         }
-        // 시간 질문인 경우
-        else if (/(몇\s*시|시간|time)/.test(lowerQuery)) {
-          const hours = dateInfo.date.getHours();
-          const minutes = dateInfo.date.getMinutes();
-          const isAM = hours < 12;
-          const hourDisplay = hours % 12 === 0 ? 12 : hours % 12;
-          const timeStr = `오${isAM ? '전' : '후'} ${hourDisplay}:${minutes.toString().padStart(2, '0')}`;
-          reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${timeStr}입니다.`;
-        }
-        // 일정 질문인 경우
-        else if (/(일정|스케줄|캘린더|미팅|회의|약속|알려\s*줘)/.test(lowerQuery)) {
+        break;
+        
+      case 'schedule':
+        try {
+          const dateInfo = parseRelativeDate(trimmed) || parseRelativeDate('오늘');
           const events = await fetchEventsForDay(dateInfo.date);
           if (events && events.length > 0) {
             const now = new Date();
             const currentTime = now.getTime();
             
-            // 모든 일정을 시간순으로 정렬
             const sortedEvents = events.sort((a, b) => {
               const aTime = a.isAllDay ? 0 : new Date(a.start).getTime();
               const bTime = b.isAllDay ? 0 : new Date(b.start).getTime();
               return aTime - bTime;
             });
             
-            // 지난 일정과 남은 일정 분류
             const pastEvents = [];
             const upcomingEvents = [];
             const allDayEvents = [];
@@ -686,10 +779,8 @@ const processRecognizedCommand = async (text, dependencies) => {
               }
             });
             
-            // 자연스러운 응답 구성
             let responseParts = [];
             
-            // 하루종일 일정이 있으면 먼저 언급
             if (allDayEvents.length > 0) {
               const allDayDescriptions = allDayEvents.map(ev => ev.summary);
               if (allDayDescriptions.length === 1) {
@@ -699,7 +790,6 @@ const processRecognizedCommand = async (text, dependencies) => {
               }
             }
             
-            // 지난 일정이 있으면 언급
             if (pastEvents.length > 0) {
               const pastDescriptions = pastEvents.map(ev => {
                 const time = formatKSTTimeFromISO(ev.start);
@@ -712,7 +802,6 @@ const processRecognizedCommand = async (text, dependencies) => {
               }
             }
             
-            // 남은 일정이 있으면 언급
             if (upcomingEvents.length > 0) {
               const upcomingDescriptions = upcomingEvents.map(ev => {
                 const time = formatKSTTimeFromISO(ev.start);
@@ -725,93 +814,76 @@ const processRecognizedCommand = async (text, dependencies) => {
               }
             }
             
-            // 응답 조합 (자연스러운 문장 구성)
             if (responseParts.length === 1) {
-              reply = responseParts[0] + '.';
+              reply = addEmotionBasedResponse(responseParts[0] + '.', currentEmotion);
             } else if (responseParts.length === 2) {
-              reply = responseParts[0] + '이고, ' + responseParts[1] + '.';
+              reply = addEmotionBasedResponse(responseParts[0] + '이고, ' + responseParts[1] + '.', currentEmotion);
             } else {
-              reply = responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.';
+              reply = addEmotionBasedResponse(responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.', currentEmotion);
             }
-            
           } else {
-            reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]} 등록된 일정이 없습니다.`;
+            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo).split(' (')[0]} 등록된 일정이 없습니다.`, currentEmotion);
           }
+        } catch (error) {
+          log.error('일정 처리 실패:', error.message);
+          reply = addEmotionBasedResponse('일정 정보를 처리하는 데 실패했습니다.', currentEmotion);
         }
-        // 일반 날짜 질문인 경우
-        else {
-          reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
-        }
-      } catch (error) {
-        log.error('날짜/일정 처리 실패:', error.message);
-        reply = '요청을 처리하는 데 실패했습니다.';
-      }
-    }
-    // 5. 감정 분석 관련 질문
-    else if (/(감정|기분|마음|상태|어떤\s*기분|어떤\s*감정)/.test(trimmed)) {
-      if (emotionAnalysisSystem) {
-        const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
-        if (currentEmotion.emotion && currentEmotion.confidence > 0.5) {
-          const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
-            currentEmotion.emotion, 
-            currentEmotion.confidence
-          );
-          reply = emotionResponse.response;
-        } else {
-          reply = '아직 충분한 음성 데이터가 없어서 감정을 분석하기 어려워요. 조금 더 말씀해 주시면 분석해드릴게요.';
-        }
-      } else {
-        reply = '감정 분석 시스템이 준비되지 않았습니다.';
-      }
-    }
-    // 6. 음악 추천 요청
-    else if (/(음악|노래|플레이리스트|추천|들어보고|듣고싶)/.test(trimmed)) {
-      if (emotionAnalysisSystem) {
-        const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
-        if (currentEmotion.emotion) {
-          const musicRecommendation = emotionAnalysisSystem.getMusicRecommendation(currentEmotion.emotion);
-          reply = `현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`;
-        } else {
-          reply = '기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?';
-        }
-      } else {
-        reply = '음악 추천 시스템이 준비되지 않았습니다.';
-      }
-    }
-    // 7. 액션 의도 분석 (일정 등록, 알림 등)
-    else if (/(등록|추가|생성|만들어|예약|약속|알림|리마인더)/.test(trimmed)) {
-      const actionIntent = analyzeActionIntent(trimmed, contextSummary);
-      
-      if (actionIntent.type === 'schedule_registration') {
-        const scheduleResult = await handleScheduleRegistration(trimmed, contextSummary, dependencies);
-        reply = scheduleResult.message;
+        break;
         
-        if (scheduleResult.success) {
-          // 대기 중인 액션 완료
-          conversationContext.completePendingAction(userId, 'schedule_registration');
+      case 'news':
+        try {
+          const newsRes = await processNewsQuery(trimmed);
+          reply = addEmotionBasedResponse(newsRes.response || '뉴스 정보를 불러올 수 없습니다.', currentEmotion);
+        } catch {
+          reply = addEmotionBasedResponse('뉴스 정보를 가져오는 데 실패했습니다.', currentEmotion);
         }
-      } else {
-        // 일반적인 액션 요청은 감정 기반 맥락 대화로 처리
-        reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
-      }
-    }
-    // 8. 감정 기반 맥락 대화 처리 (기본)
-    else {
-      // 감정이 감지되고 신뢰도가 높은 경우 감정 기반 맥락 응답
-      if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.3) {
-        reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+        break;
         
-        // 대화 흐름에 추가
-        conversationContext.addConversationFlow(userId, {
-          userInput: trimmed,
-          emotion: currentEmotion.emotion,
-          confidence: currentEmotion.confidence,
-          response: reply
-        });
-      } else {
-        // 감정이 감지되지 않은 경우 일반 GPT 응답
-        reply = await answerWithGPT(trimmed, contextSummary, openai);
-      }
+      case 'emotion':
+        // 감정 표현에 대한 공감적 응답
+        if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.4) {
+          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+        } else {
+          reply = await answerWithGPT(trimmed, contextSummary, openai);
+        }
+        break;
+        
+      case 'music':
+        if (emotionAnalysisSystem) {
+          const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+          if (currentEmotion.emotion) {
+            const musicRecommendation = emotionAnalysisSystem.getMusicRecommendation(currentEmotion.emotion);
+            reply = addEmotionBasedResponse(`현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`, currentEmotion);
+          } else {
+            reply = addEmotionBasedResponse('기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?', currentEmotion);
+          }
+        } else {
+          reply = addEmotionBasedResponse('음악 추천 시스템이 준비되지 않았습니다.', currentEmotion);
+        }
+        break;
+        
+      case 'action':
+        const actionIntent = analyzeActionIntent(trimmed, contextSummary);
+        if (actionIntent.type === 'schedule_registration') {
+          const scheduleResult = await handleScheduleRegistration(trimmed, contextSummary, dependencies);
+          reply = addEmotionBasedResponse(scheduleResult.message, currentEmotion);
+          if (scheduleResult.success) {
+            conversationContext.completePendingAction(userId, 'schedule_registration');
+          }
+        } else {
+          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+        }
+        break;
+        
+      case 'general':
+      default:
+        // 일반적인 대화는 GPT가 처리하되 감정 정보 포함
+        if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.3) {
+          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+        } else {
+          reply = await answerWithGPT(trimmed, contextSummary, openai);
+        }
+        break;
     }
     
     // 대화 컨텍스트에 메시지 추가
@@ -1176,6 +1248,8 @@ module.exports = {
   analyzeUserIntent,
   generateContextualResponse,
   generateEmotionBasedContextualResponse,
+  classifyUserQuestion,
+  addEmotionBasedResponse,
   handleRoutineStep,
   generateRoutineSummary,
   handleScheduleRegistration,

@@ -629,7 +629,7 @@ class EmotionAnalysisSystem {
 
       const result = await this.analyzeEmotionWithPreTrainedModel(audioBuffer);
       
-      if (result.emotion !== 'unknown' && result.confidence > 0.3) {
+      if (result.emotion !== 'unknown' && result.confidence > 0.2) {
         // 감정 히스토리 업데이트
         this.emotionHistory.push({
           emotion: result.emotion,
@@ -670,8 +670,14 @@ class EmotionAnalysisSystem {
       // 간단한 특징 분석
       let sum = 0;
       let zeroCrossings = 0;
+      let maxAmplitude = 0;
+      let variance = 0;
+      
       for (let i = 0; i < samples.length; i++) {
-        sum += Math.abs(samples[i]);
+        const absValue = Math.abs(samples[i]);
+        sum += absValue;
+        maxAmplitude = Math.max(maxAmplitude, absValue);
+        
         if (i > 0 && ((samples[i] >= 0 && samples[i-1] < 0) || (samples[i] < 0 && samples[i-1] >= 0))) {
           zeroCrossings++;
         }
@@ -679,26 +685,44 @@ class EmotionAnalysisSystem {
       
       const avgVolume = sum / samples.length;
       const zeroCrossingRate = zeroCrossings / samples.length;
+      const volumeVariability = maxAmplitude / avgVolume;
       
-      // 간단한 규칙 기반 감정 분류
+      // 개선된 규칙 기반 감정 분류
       let emotion = 'neutral';
       let confidence = 0.5;
       
-      if (avgVolume > 5000) {
-        if (zeroCrossingRate > 0.1) {
-          emotion = 'happy';
-          confidence = 0.7;
-        } else {
-          emotion = 'angry';
-          confidence = 0.6;
-        }
-      } else if (avgVolume < 2000) {
-        emotion = 'sad';
+      // 화난 감정 (높은 볼륨, 낮은 제로 크로싱)
+      if (avgVolume > 4000 && zeroCrossingRate < 0.08) {
+        emotion = 'angry';
+        confidence = 0.7;
+      }
+      // 짜증난 감정 (중간 볼륨, 낮은 제로 크로싱)
+      else if (avgVolume > 3000 && avgVolume <= 4000 && zeroCrossingRate < 0.1) {
+        emotion = 'frustrated';
         confidence = 0.6;
-      } else if (zeroCrossingRate > 0.15) {
+      }
+      // 행복한 감정 (높은 볼륨, 높은 제로 크로싱)
+      else if (avgVolume > 3500 && zeroCrossingRate > 0.12) {
+        emotion = 'happy';
+        confidence = 0.7;
+      }
+      // 흥분한 감정 (높은 볼륨, 높은 변동성)
+      else if (avgVolume > 3000 && volumeVariability > 3) {
         emotion = 'excited';
         confidence = 0.6;
       }
+      // 슬픈 감정 (낮은 볼륨, 낮은 제로 크로싱)
+      else if (avgVolume < 2000 && zeroCrossingRate < 0.05) {
+        emotion = 'sad';
+        confidence = 0.6;
+      }
+      // 중립 (기본값)
+      else {
+        emotion = 'neutral';
+        confidence = 0.5;
+      }
+      
+      log.info(`🎭 기본 감정 분석: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%, 볼륨: ${avgVolume.toFixed(0)}, ZCR: ${zeroCrossingRate.toFixed(3)})`);
       
       return { emotion, confidence };
       
