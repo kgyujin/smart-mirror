@@ -1,4 +1,4 @@
-const tf = require('@tensorflow/tfjs-node-cpu');
+const tf = require('@tensorflow/tfjs-node');
 const { log } = require('./logging');
 
 // 감정 분석 시스템 (TensorFlow.js 기반)
