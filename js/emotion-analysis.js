@@ -610,14 +610,18 @@ class EmotionAnalysisSystem {
   // 음성 버퍼에서 감정 분석
   async analyzeEmotionFromBuffer(audioBuffer) {
     try {
+      log.info(`🎤 감정 분석 시작 - 오디오 버퍼 크기: ${audioBuffer?.length || 0} bytes`);
+      
       // 최소 1초 분량의 오디오가 필요
       if (!audioBuffer || audioBuffer.length < 16000) {
+        log.info('🎤 오디오 버퍼가 충분하지 않음');
         return { emotion: 'unknown', confidence: 0 };
       }
 
-      // 너무 자주 분석하지 않도록 제한 (5초마다)
+      // 너무 자주 분석하지 않도록 제한 (3초마다)
       const now = Date.now();
-      if (now - this.lastAnalysisTime < 5000) {
+      if (now - this.lastAnalysisTime < 3000) {
+        log.debug('🎭 너무 자주 분석 요청됨, 이전 결과 반환');
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
@@ -627,6 +631,7 @@ class EmotionAnalysisSystem {
         return this.analyzeBasicEmotion(audioBuffer);
       }
 
+      log.info('🤖 사전 훈련된 모델로 감정 분석 시작...');
       const result = await this.analyzeEmotionWithPreTrainedModel(audioBuffer);
       
       if (result.emotion !== 'unknown' && result.confidence > 0.2) {
@@ -648,6 +653,8 @@ class EmotionAnalysisSystem {
         this.lastAnalysisTime = now;
         
         log.info(`🎭 감정 인식: ${result.emotion} (신뢰도: ${(result.confidence * 100).toFixed(1)}%)`);
+      } else {
+        log.info(`🎭 감정 인식 실패: ${result.emotion} (신뢰도: ${(result.confidence * 100).toFixed(1)}%)`);
       }
       
       return result;
@@ -722,12 +729,12 @@ class EmotionAnalysisSystem {
         confidence = 0.5;
       }
       
-      log.info(`🎭 기본 감정 분석: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%, 볼륨: ${avgVolume.toFixed(0)}, ZCR: ${zeroCrossingRate.toFixed(3)})`);
+      log.info(`🎭 기본 감정 분석 결과: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%, 볼륨: ${avgVolume.toFixed(0)}, ZCR: ${zeroCrossingRate.toFixed(3)})`);
       
       return { emotion, confidence };
       
     } catch (error) {
-      log.error('기본 감정 분석 실패:', error.message);
+      log.error('❌ 기본 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }

@@ -110,15 +110,19 @@ const startEmotionAnalysis = (broadcast) => {
     clearInterval(emotionAnalysisInterval);
   }
   
-  // 5초마다 감정 분석 수행
+  log.info('🎭 감정 분석 시작');
+  
+  // 3초마다 감정 분석 수행 (더 자주 분석)
   emotionAnalysisInterval = setInterval(async () => {
     if (currentAudioBuffer && currentAudioBuffer.length > 16000) { // 최소 1초 분량
       try {
+        log.info(`🎤 오디오 버퍼 크기: ${currentAudioBuffer.length} bytes`);
+        
         const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
         
-        if (emotionResult.emotion !== 'unknown' && emotionResult.confidence > 0.5) {
-          log.info('감정 분석 결과:', emotionResult);
-          
+        log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+        
+        if (emotionResult.emotion !== 'unknown' && emotionResult.confidence > 0.3) {
           // 감정 기반 응답 생성
           const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
             emotionResult.emotion, 
@@ -140,10 +144,12 @@ const startEmotionAnalysis = (broadcast) => {
         // 버퍼 초기화
         currentAudioBuffer = null;
       } catch (error) {
-        log.error('감정 분석 실패:', error.message);
+        log.error('❌ 감정 분석 실패:', error.message);
       }
+    } else {
+      log.debug('🎤 오디오 버퍼가 충분하지 않음');
     }
-  }, 5000); // 5초마다 분석
+  }, 3000); // 3초마다 분석
 };
 
 // 감정 분석 중지
@@ -299,9 +305,15 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       // 오디오 데이터를 감정 분석을 위해 버퍼에 저장
       if (currentAudioBuffer) {
         currentAudioBuffer = Buffer.concat([currentAudioBuffer, chunk]);
+        // 버퍼 크기 제한 (10초 분량)
+        if (currentAudioBuffer.length > 320000) { // 16kHz * 2 bytes * 10 seconds
+          currentAudioBuffer = currentAudioBuffer.slice(-160000); // 마지막 5초만 유지
+        }
       } else {
         currentAudioBuffer = chunk;
       }
+      
+      log.debug(`🎤 오디오 버퍼 크기: ${currentAudioBuffer.length} bytes`);
     })
     .pipe(recognizeStream);
     
