@@ -100,17 +100,31 @@ CALENDAR_ICS_URLS=https://example.com/calendar.ics
 3. 의존성 설치
    ```bash
    npm install
-    ```
+   ```
     
-    **감정 분석 모델 설치 (라즈베리파이):**
-    ```bash
-    python3 install_speechbrain.py
-    ```
-        ```
-  4. 서버 실행
+   **감정 분석 모델 설치 (라즈베리파이):**
    ```bash
+   # 방법 1: 자동 설치 스크립트
+   chmod +x setup_emotion_env.sh
+   ./setup_emotion_env.sh
+   
+   # 방법 2: 수동 설치
+   python3 install_speechbrain.py
+   ```
+   
+4. 서버 실행
+   ```bash
+   # 방법 1: 자동 스크립트 (가상환경 자동 활성화)
+   chmod +x start_smart_mirror.sh
+   ./start_smart_mirror.sh
+   
+   # 방법 2: 수동 실행
+   source emotion_env/bin/activate  # 가상환경 활성화
    node app.js
-        ```
+   
+   # 방법 3: 일반 실행 (감정 분석 없음)
+   node app.js
+   ```
   5. 웹 인터페이스 접속
    ```
    http://localhost:3000

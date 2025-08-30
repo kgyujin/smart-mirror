@@ -237,21 +237,19 @@ except Exception as e:
       
       if (result.status === 'success') {
         this.isModelLoaded = true;
-        log.info('SpeechBrain 모델 초기화 완료');
+        log.info('✅ SpeechBrain 모델 초기화 완료 - 고성능 감정 분석 사용 가능');
       } else {
-        log.error('SpeechBrain 모델 초기화 실패:', result.message);
-        log.info('JavaScript 기반 감정 분석을 사용합니다.');
-        this.isModelLoaded = false;
+        log.error('❌ SpeechBrain 모델 초기화 실패:', result.message);
+        throw new Error('SpeechBrain 모델 초기화에 실패했습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
       }
       
     } catch (error) {
-      log.error('SpeechBrain 모델 초기화 중 오류:', error.message);
-      log.info('JavaScript 기반 감정 분석을 사용합니다.');
-      this.isModelLoaded = false;
+      log.error('❌ SpeechBrain 모델 초기화 중 오류:', error.message);
+      throw new Error('SpeechBrain 모델 초기화에 실패했습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
     }
   }
 
-  // Python 스크립트 실행
+  // Python 스크립트 실행 (가상환경 우선 사용)
   async runPythonScript(script) {
     return new Promise((resolve, reject) => {
       const tempFile = path.join(__dirname, '..', 'temp_script.py');
@@ -259,7 +257,17 @@ except Exception as e:
       try {
         fs.writeFileSync(tempFile, script);
         
-        exec(`python3 "${tempFile}"`, (error, stdout, stderr) => {
+        // 가상환경의 Python 경로 우선 사용
+        const pythonPaths = [
+          path.join(__dirname, '..', 'emotion_env', 'bin', 'python'),
+          './emotion_env/bin/python',
+          'emotion_env/bin/python',
+          'python3'
+        ];
+        
+        let pythonPath = pythonPaths[0];
+        
+        exec(`"${pythonPath}" "${tempFile}"`, (error, stdout, stderr) => {
           try {
             fs.unlinkSync(tempFile);
           } catch (e) {
@@ -267,6 +275,50 @@ except Exception as e:
           }
           
           if (error) {
+            // 첫 번째 경로 실패 시 다른 경로 시도
+            if (pythonPath === pythonPaths[0]) {
+              pythonPath = pythonPaths[1];
+              exec(`"${pythonPath}" "${tempFile}"`, (error2, stdout2, stderr2) => {
+                try { fs.unlinkSync(tempFile); } catch (e) {}
+                if (error2) {
+                  pythonPath = pythonPaths[2];
+                  exec(`"${pythonPath}" "${tempFile}"`, (error3, stdout3, stderr3) => {
+                    try { fs.unlinkSync(tempFile); } catch (e) {}
+                    if (error3) {
+                      pythonPath = pythonPaths[3];
+                      exec(`"${pythonPath}" "${tempFile}"`, (error4, stdout4, stderr4) => {
+                        try { fs.unlinkSync(tempFile); } catch (e) {}
+                        if (error4) {
+                          reject(new Error(`Python 실행 오류: ${error4.message}`));
+                          return;
+                        }
+                        try {
+                          const result = JSON.parse(stdout4.trim());
+                          resolve(result);
+                        } catch (e) {
+                          reject(new Error(`JSON 파싱 오류: ${stdout4}`));
+                        }
+                      });
+                      return;
+                    }
+                    try {
+                      const result = JSON.parse(stdout3.trim());
+                      resolve(result);
+                    } catch (e) {
+                      reject(new Error(`JSON 파싱 오류: ${stdout3}`));
+                    }
+                  });
+                  return;
+                }
+                try {
+                  const result = JSON.parse(stdout2.trim());
+                  resolve(result);
+                } catch (e) {
+                  reject(new Error(`JSON 파싱 오류: ${stdout2}`));
+                }
+              });
+              return;
+            }
             reject(new Error(`Python 실행 오류: ${error.message}`));
             return;
           }
@@ -419,9 +471,12 @@ except Exception as e:
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
-      log.info('SpeechBrain으로 감정 분석 시작...');
-      
-      // SpeechBrain으로 감정 분석
+      // SpeechBrain 모델이 로드되지 않았으면 오류 발생
+      if (!this.isModelLoaded) {
+        throw new Error('SpeechBrain 모델이 로드되지 않았습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
+      }
+
+      log.info('🤖 SpeechBrain으로 감정 분석 시작...');
       const result = await this.analyzeEmotionWithSpeechBrain(audioBuffer);
       
       if (result.emotion !== 'unknown' && result.confidence > 0.3) {
@@ -442,14 +497,14 @@ except Exception as e:
         this.emotionConfidence = result.confidence;
         this.lastAnalysisTime = now;
         
-        log.info('감정 분석 완료:', result);
+        log.info('✅ 감정 분석 완료:', result);
       }
       
       return result;
       
     } catch (error) {
-      log.error('감정 분석 실패:', error.message);
-      return { emotion: 'unknown', confidence: 0 };
+      log.error('❌ 감정 분석 실패:', error.message);
+      throw error; // 오류를 다시 던져서 상위에서 처리하도록 함
     }
   }
 
