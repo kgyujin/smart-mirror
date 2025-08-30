@@ -581,7 +581,7 @@ class EmotionAnalysisSystem {
       }
 
       // 특성을 모델 입력 형태로 변환 (13x1)
-      const input = tf.tensor3d([features], [1, 13, 1]);
+      const input = tf.tensor3d([features.map(f => [f])], [1, 13, 1]);
       const prediction = this.model.predict(input);
       const probabilities = await prediction.array();
       
