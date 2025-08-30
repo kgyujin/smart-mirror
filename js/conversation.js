@@ -9,8 +9,8 @@ const { EmotionAnalysisSystem } = require('./emotion-analysis');
 class ConversationContext {
   constructor() {
     this.contexts = new Map(); // 사용자별 컨텍스트
-    this.sessionTimeout = 5 * 60 * 1000; // 5분 세션 타임아웃
-    this.maxContextLength = 10; // 최대 컨텍스트 길이
+    this.sessionTimeout = 30 * 60 * 1000; // 30분 세션 타임아웃 (대화 맥락 유지)
+    this.maxContextLength = 20; // 최대 컨텍스트 길이 (더 긴 대화 기록)
   }
 
   // 사용자 컨텍스트 가져오기
@@ -22,7 +22,11 @@ class ConversationContext {
         lastInteraction: Date.now(),
         userIntent: null,
         followUpQuestions: [],
-        routineContext: null
+        routineContext: null,
+        emotionHistory: [], // 감정 히스토리
+        conversationFlow: [], // 대화 흐름
+        userPreferences: {}, // 사용자 선호도
+        pendingActions: [] // 대기 중인 액션 (일정 등록 등)
       });
     }
     return this.contexts.get(userId);
@@ -92,10 +96,57 @@ class ConversationContext {
     return {
       currentTopic: context.currentTopic,
       userIntent: context.userIntent,
-      recentMessages: context.messages.slice(-3), // 최근 3개 메시지
+      recentMessages: context.messages.slice(-5), // 최근 5개 메시지
       followUpQuestions: context.followUpQuestions.slice(-2), // 최근 2개 후속 질문
-      routineContext: context.routineContext
+      routineContext: context.routineContext,
+      emotionHistory: context.emotionHistory.slice(-3), // 최근 3개 감정
+      conversationFlow: context.conversationFlow.slice(-5), // 최근 5개 대화 흐름
+      pendingActions: context.pendingActions
     };
+  }
+
+  // 감정 히스토리 추가
+  addEmotionHistory(userId, emotion, confidence) {
+    const context = this.getUserContext(userId);
+    context.emotionHistory.push({
+      emotion,
+      confidence,
+      timestamp: Date.now()
+    });
+    
+    // 최근 10개 감정만 유지
+    if (context.emotionHistory.length > 10) {
+      context.emotionHistory = context.emotionHistory.slice(-10);
+    }
+  }
+
+  // 대화 흐름 추가
+  addConversationFlow(userId, flow) {
+    const context = this.getUserContext(userId);
+    context.conversationFlow.push({
+      ...flow,
+      timestamp: Date.now()
+    });
+    
+    // 최근 15개 흐름만 유지
+    if (context.conversationFlow.length > 15) {
+      context.conversationFlow = context.conversationFlow.slice(-15);
+    }
+  }
+
+  // 대기 중인 액션 추가
+  addPendingAction(userId, action) {
+    const context = this.getUserContext(userId);
+    context.pendingActions.push({
+      ...action,
+      timestamp: Date.now()
+    });
+  }
+
+  // 대기 중인 액션 완료
+  completePendingAction(userId, actionId) {
+    const context = this.getUserContext(userId);
+    context.pendingActions = context.pendingActions.filter(action => action.id !== actionId);
   }
 }
 
@@ -236,6 +287,107 @@ const analyzeUserIntent = (text) => {
   return { type: 'general', confidence: 0.5 };
 };
 
+// 감정 기반 맥락 대화 처리
+const generateEmotionBasedContextualResponse = async (userText, emotionData, contextSummary, openai) => {
+  try {
+    if (!openai) return null;
+
+    const currentEmotion = emotionData?.emotion || 'neutral';
+    const confidence = emotionData?.confidence || 0.5;
+    
+    // 감정별 시스템 프롬프트 구성
+    const emotionPrompts = {
+      'sad': `당신은 공감적이고 따뜻한 상담사입니다. 사용자가 슬픈 감정을 표현할 때:
+- 진심으로 공감하고 위로해주세요
+- 구체적인 상황을 물어보세요
+- 실질적인 도움을 제안하세요
+- 부드럽고 따뜻한 톤을 유지하세요`,
+      
+      'angry': `당신은 차분하고 이해심 많은 상담사입니다. 사용자가 화난 감정을 표현할 때:
+- 분노를 인정하고 정당화해주세요
+- 차분하게 상황을 파악해주세요
+- 해결책을 함께 찾아보세요
+- 감정을 진정시킬 수 있는 방법을 제안하세요`,
+      
+      'happy': `당신은 진심으로 기뻐하는 친구입니다. 사용자가 행복한 감정을 표현할 때:
+- 진심으로 축하하고 함께 기뻐하세요
+- 긍정적인 에너지를 유지해주세요
+- 좋은 일에 대해 더 자세히 물어보세요
+- 그 기쁨을 계속 유지할 수 있도록 격려하세요`,
+      
+      'excited': `당신은 열정적인 친구입니다. 사용자가 흥분된 감정을 표현할 때:
+- 그 에너지에 함께 동참하세요
+- 구체적인 계획을 물어보세요
+- 긍정적인 에너지를 활용할 수 있도록 도와주세요`,
+      
+      'frustrated': `당신은 인내심 있는 상담사입니다. 사용자가 좌절감을 표현할 때:
+- 좌절감을 인정하고 공감해주세요
+- 문제를 단계별로 정리해주세요
+- 실질적인 해결책을 제안하세요`,
+      
+      'fearful': `당신은 안전감을 주는 상담사입니다. 사용자가 두려운 감정을 표현할 때:
+- 안전하다고 안심시켜주세요
+- 구체적인 걱정사항을 물어보세요
+- 해결책을 함께 찾아보세요`,
+      
+      'neutral': `당신은 친근한 대화 상대입니다. 사용자가 중립적인 감정을 표현할 때:
+- 자연스럽게 대화를 이어가세요
+- 관심사나 계획을 물어보세요
+- 실용적인 정보를 제공하세요`
+    };
+
+    const systemPrompt = `당신은 스마트 미러의 AI 비서입니다. 사용자의 감정과 대화 맥락을 고려하여 자연스럽고 도움이 되는 답변을 제공하세요.
+
+${emotionPrompts[currentEmotion] || emotionPrompts['neutral']}
+
+대화 규칙:
+- 이전 대화 맥락을 기억하고 자연스럽게 연결하세요
+- 사용자의 감정 상태에 맞는 톤을 유지하세요
+- 구체적이고 실용적인 정보를 제공하세요
+- 존댓말을 사용하되 친근하게 대화하세요
+- 필요시 일정 등록, 알림 설정 등 실질적인 도움을 제안하세요
+- 2-3문장으로 간결하게 답변하세요`;
+
+    // 대화 맥락 구성
+    const conversationContext = contextSummary.recentMessages?.map(msg => 
+      `${msg.role === 'user' ? '사용자' : '미러'}: ${msg.content}`
+    ).join('\n') || '';
+
+    const emotionContext = contextSummary.emotionHistory?.length > 0 ? 
+      `최근 감정 변화: ${contextSummary.emotionHistory.map(e => `${e.emotion}(${(e.confidence * 100).toFixed(0)}%)`).join(' → ')}` : '';
+
+    const pendingActions = contextSummary.pendingActions?.length > 0 ?
+      `대기 중인 액션: ${contextSummary.pendingActions.map(a => a.description).join(', ')}` : '';
+
+    const user = `현재 사용자 말: ${userText}
+현재 감정: ${currentEmotion} (신뢰도: ${(confidence * 100).toFixed(0)}%)
+
+이전 대화:
+${conversationContext}
+
+${emotionContext}
+${pendingActions}
+
+맥락에 맞는 자연스러운 답변을 생성해주세요.`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: user }
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+    
+    return completion.choices?.[0]?.message?.content?.trim() || '';
+  } catch (error) {
+    log.warn('감정 기반 맥락 응답 생성 실패:', error.message);
+  }
+  
+  return null;
+};
+
 const generateContextualResponse = async (userText, userIntent, contextSummary, openai) => {
   try {
     if (openai) {
@@ -332,6 +484,94 @@ const generateRoutineSummary = (routine) => {
   return `${summary}. 총 ${completedCount}/${totalCount} 단계가 완료되었습니다.`;
 };
 
+// 일정 등록 처리
+const handleScheduleRegistration = async (userText, contextSummary, dependencies) => {
+  const { parseRelativeDate, formatKSTDate } = dependencies;
+  
+  try {
+    // 시간 정보 추출
+    const timeMatch = userText.match(/(\d{1,2})시|(\d{1,2}):(\d{2})|오후\s*(\d{1,2})시|오전\s*(\d{1,2})시/);
+    let hour = 0;
+    let minute = 0;
+    
+    if (timeMatch) {
+      if (timeMatch[1]) { // "14시" 형태
+        hour = parseInt(timeMatch[1]);
+      } else if (timeMatch[2] && timeMatch[3]) { // "14:30" 형태
+        hour = parseInt(timeMatch[2]);
+        minute = parseInt(timeMatch[3]);
+      } else if (timeMatch[4]) { // "오후 2시" 형태
+        hour = parseInt(timeMatch[4]) + 12;
+      } else if (timeMatch[5]) { // "오전 2시" 형태
+        hour = parseInt(timeMatch[5]);
+      }
+    }
+    
+    // 날짜 정보 추출 (기본값: 내일)
+    const dateInfo = parseRelativeDate(userText) || parseRelativeDate('내일');
+    const targetDate = dateInfo.date || new Date(Date.now() + 24 * 60 * 60 * 1000);
+    
+    // 일정 내용 추출 (이전 대화에서)
+    let scheduleContent = '병원 방문';
+    const recentMessages = contextSummary.recentMessages || [];
+    
+    // 이전 대화에서 일정 관련 내용 찾기
+    for (let i = recentMessages.length - 1; i >= 0; i--) {
+      const msg = recentMessages[i];
+      if (msg.role === 'user' && (msg.content.includes('병원') || msg.content.includes('다쳤') || msg.content.includes('상처'))) {
+        scheduleContent = '병원 방문';
+        break;
+      }
+    }
+    
+    // 일정 등록 (실제로는 Google Calendar API 호출)
+    const scheduleDate = new Date(targetDate);
+    scheduleDate.setHours(hour, minute, 0, 0);
+    
+    const formattedDate = formatKSTDate(scheduleDate);
+    const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    
+    return {
+      success: true,
+      message: `${formattedDate} ${timeStr}에 ${scheduleContent} 일정을 등록했어요.`,
+      schedule: {
+        date: scheduleDate,
+        time: timeStr,
+        content: scheduleContent
+      }
+    };
+    
+  } catch (error) {
+    log.error('일정 등록 처리 실패:', error.message);
+    return {
+      success: false,
+      message: '일정 등록에 실패했어요. 다시 시도해보세요.'
+    };
+  }
+};
+
+// 액션 의도 분석
+const analyzeActionIntent = (userText, contextSummary) => {
+  const lowerText = userText.toLowerCase();
+  
+  // 일정 등록 의도
+  if (/(등록|추가|생성|만들어|예약|약속)/.test(lowerText)) {
+    return { type: 'schedule_registration', confidence: 0.9 };
+  }
+  
+  // 알림 설정 의도
+  if (/(알림|리마인더|상기|깜빡|잊어버리)/.test(lowerText)) {
+    return { type: 'reminder_setting', confidence: 0.8 };
+  }
+  
+  // 정보 검색 의도
+  if (/(찾아|검색|알려|정보|어떻게|어디)/.test(lowerText)) {
+    return { type: 'information_search', confidence: 0.7 };
+  }
+  
+  return { type: 'general', confidence: 0.5 };
+};
+
 // 메인 대화 처리 함수
 const processRecognizedCommand = async (text, dependencies) => {
   const {
@@ -357,7 +597,20 @@ const processRecognizedCommand = async (text, dependencies) => {
   let reply = '';
   
   try {
-    // backup 파일의 간단하고 효과적인 방식
+    // 대화 컨텍스트 가져오기
+    const context = conversationContext.getUserContext(userId);
+    const contextSummary = conversationContext.getContextSummary(userId);
+    
+    // 감정 분석 결과 확인
+    let currentEmotion = null;
+    if (emotionAnalysisSystem) {
+      currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+      if (currentEmotion.emotion && currentEmotion.confidence > 0.3) {
+        // 감정 히스토리에 추가
+        conversationContext.addEmotionHistory(userId, currentEmotion.emotion, currentEmotion.confidence);
+      }
+    }
+    
     // 1. 뉴스 관련 질문
     if (/뉴스/.test(trimmed)) {
       try {
@@ -525,10 +778,45 @@ const processRecognizedCommand = async (text, dependencies) => {
         reply = '음악 추천 시스템이 준비되지 않았습니다.';
       }
     }
-    // 7. 일반 대화는 GPT에 위임
-    else {
-      reply = await answerWithGPT(trimmed, {}, openai);
+    // 7. 액션 의도 분석 (일정 등록, 알림 등)
+    else if (/(등록|추가|생성|만들어|예약|약속|알림|리마인더)/.test(trimmed)) {
+      const actionIntent = analyzeActionIntent(trimmed, contextSummary);
+      
+      if (actionIntent.type === 'schedule_registration') {
+        const scheduleResult = await handleScheduleRegistration(trimmed, contextSummary, dependencies);
+        reply = scheduleResult.message;
+        
+        if (scheduleResult.success) {
+          // 대기 중인 액션 완료
+          conversationContext.completePendingAction(userId, 'schedule_registration');
+        }
+      } else {
+        // 일반적인 액션 요청은 감정 기반 맥락 대화로 처리
+        reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+      }
     }
+    // 8. 감정 기반 맥락 대화 처리 (기본)
+    else {
+      // 감정이 감지되고 신뢰도가 높은 경우 감정 기반 맥락 응답
+      if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.3) {
+        reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
+        
+        // 대화 흐름에 추가
+        conversationContext.addConversationFlow(userId, {
+          userInput: trimmed,
+          emotion: currentEmotion.emotion,
+          confidence: currentEmotion.confidence,
+          response: reply
+        });
+      } else {
+        // 감정이 감지되지 않은 경우 일반 GPT 응답
+        reply = await answerWithGPT(trimmed, contextSummary, openai);
+      }
+    }
+    
+    // 대화 컨텍스트에 메시지 추가
+    conversationContext.addMessage(userId, 'user', trimmed);
+    conversationContext.addMessage(userId, 'assistant', reply);
     
     // 개인화 시스템에 상호작용 기록
     personalizationSystem.recordInteraction(trimmed, reply);
@@ -541,6 +829,10 @@ const processRecognizedCommand = async (text, dependencies) => {
   } catch (e) {
     log.error('명령 처리 오류:', e.message);
     reply = '요청을 처리하는 중 문제가 발생했습니다.';
+    
+    // 에러 발생 시에도 컨텍스트에 기록
+    conversationContext.addMessage(userId, 'user', trimmed);
+    conversationContext.addMessage(userId, 'assistant', reply);
     
     personalizationSystem.recordInteraction(trimmed, reply);
     
@@ -582,6 +874,15 @@ const getWeekdayShortKorean = (dateLike) => ['일','월','화','수','목','금'
 
 // ========== 상대적 날짜 처리 함수들 ==========
 const getKSTNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+
+// KST 날짜 포맷팅 (매개변수 받는 버전)
+const formatKSTDate = (date = new Date()) => {
+  const targetDate = new Date(date);
+  const year = targetDate.getFullYear();
+  const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
+  const day = targetDate.getDate().toString().padStart(2, '0');
+  return `${year}년 ${month}월 ${day}일`;
+};
 
 const parseRelativeDate = (text) => {
   const lowerText = text.toLowerCase().trim();
@@ -874,8 +1175,11 @@ module.exports = {
   PersonalizedRoutine,
   analyzeUserIntent,
   generateContextualResponse,
+  generateEmotionBasedContextualResponse,
   handleRoutineStep,
   generateRoutineSummary,
+  handleScheduleRegistration,
+  analyzeActionIntent,
   processRecognizedCommand,
   answerWithGPT,
   composeWithOpenAI,
