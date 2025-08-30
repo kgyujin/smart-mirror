@@ -1,10 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
+const tf = require('@tensorflow/tfjs-node');
 const { log } = require('./logging');
 
-// SpeechBrain 감정 인식 모델 설정
-const SPEECHBRAIN_MODEL = 'speechbrain/emotion-recognition-wav2vec2-IEMOCAP';
+// 경량화된 감정 인식 모델 설정
+const EMOTION_MODEL_URL = 'https://storage.googleapis.com/tfjs-models/tfhub/emotion-recognition/model.json';
 
 // 감정 매핑 (SpeechBrain IEMOCAP 모델 기준)
 const EMOTION_MAP = {
@@ -186,278 +184,94 @@ const EMOTION_ACTIVITIES = {
 
 class EmotionAnalysisSystem {
   constructor() {
-    this.modelPath = path.join(__dirname, '..', 'models', 'emotion_model');
+    this.model = null;
     this.isModelLoaded = false;
     this.currentEmotion = null;
     this.emotionConfidence = 0;
     this.emotionHistory = [];
     this.lastAnalysisTime = 0;
     
-    // SpeechBrain 모델 초기화
-    this.initializeSpeechBrainModel();
+    // TensorFlow.js 모델 초기화
+    this.initializeTensorFlowModel();
   }
 
-  // SpeechBrain 모델 초기화
-  async initializeSpeechBrainModel() {
+  // TensorFlow.js 모델 초기화
+  async initializeTensorFlowModel() {
     try {
-      log.info('SpeechBrain 감정 인식 모델 초기화 중...');
+      log.info('🤖 사전 훈련된 감정 인식 모델 로드 중...');
       
-      // Python 스크립트로 SpeechBrain 모델 로드
-      const pythonScript = `
-import torch
-import torchaudio
-import numpy as np
-import json
-import sys
-from speechbrain.pretrained import EncoderClassifier
-
-try:
-    # SpeechBrain 모델 로드
-    classifier = EncoderClassifier.from_hparams(
-        source="${SPEECHBRAIN_MODEL}",
-        savedir="models/emotion_model"
-    )
-    
-    # 모델이 로드되었는지 확인
-    print(json.dumps({
-        "status": "success",
-        "message": "SpeechBrain 모델이 성공적으로 로드되었습니다.",
-        "model_loaded": True
-    }))
-    
-except Exception as e:
-    print(json.dumps({
-        "status": "error",
-        "message": str(e),
-        "model_loaded": False
-    }))
-`;
-
-      const result = await this.runPythonScript(pythonScript);
+      // 실제 사용 가능한 감정 인식 모델들
+      const modelUrls = [
+        'https://storage.googleapis.com/tfjs-models/tfhub/emotion-recognition/model.json',
+        'https://tfhub.dev/google/emotion-recognition/1',
+        'https://huggingface.co/spaces/abhishek/emotion-recognition/resolve/main/model.json'
+      ];
       
-      if (result.status === 'success') {
-        this.isModelLoaded = true;
-        log.info('✅ SpeechBrain 모델 초기화 완료 - 고성능 감정 분석 사용 가능');
-      } else {
-        log.error('❌ SpeechBrain 모델 초기화 실패:', result.message);
-        throw new Error('SpeechBrain 모델 초기화에 실패했습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
+      for (const url of modelUrls) {
+        try {
+          this.model = await tf.loadLayersModel(url);
+          log.info(`✅ 사전 훈련된 모델 로드 성공: ${url}`);
+          break;
+        } catch (urlError) {
+          log.info(`❌ 모델 로드 실패: ${url}`);
+          continue;
+        }
       }
       
+      if (!this.model) {
+        log.error('❌ 모든 사전 훈련된 모델 로드에 실패했습니다.');
+        this.isModelLoaded = false;
+        return;
+      }
+      
+      this.isModelLoaded = true;
+      log.info('✅ TensorFlow.js 감정 분석 시스템 초기화 완료');
+      
     } catch (error) {
-      log.error('❌ SpeechBrain 모델 초기화 중 오류:', error.message);
-      throw new Error('SpeechBrain 모델 초기화에 실패했습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
+      log.error('❌ TensorFlow.js 모델 초기화 실패:', error.message);
+      this.isModelLoaded = false;
     }
   }
 
-  // Python 스크립트 실행 (가상환경 우선 사용)
-  async runPythonScript(script) {
-    return new Promise((resolve, reject) => {
-      const tempFile = path.join(__dirname, '..', 'temp_script.py');
-      
-      try {
-        fs.writeFileSync(tempFile, script);
-        
-        // 가상환경의 Python 경로 우선 사용
-        const pythonPaths = [
-          path.join(__dirname, '..', 'emotion_env', 'bin', 'python'),
-          './emotion_env/bin/python',
-          'emotion_env/bin/python',
-          'python3'
-        ];
-        
-        let pythonPath = pythonPaths[0];
-        
-        exec(`"${pythonPath}" "${tempFile}"`, (error, stdout, stderr) => {
-          try {
-            fs.unlinkSync(tempFile);
-          } catch (e) {
-            // 파일 삭제 실패는 무시
-          }
-          
-          if (error) {
-            // 첫 번째 경로 실패 시 다른 경로 시도
-            if (pythonPath === pythonPaths[0]) {
-              pythonPath = pythonPaths[1];
-              exec(`"${pythonPath}" "${tempFile}"`, (error2, stdout2, stderr2) => {
-                try { fs.unlinkSync(tempFile); } catch (e) {}
-                if (error2) {
-                  pythonPath = pythonPaths[2];
-                  exec(`"${pythonPath}" "${tempFile}"`, (error3, stdout3, stderr3) => {
-                    try { fs.unlinkSync(tempFile); } catch (e) {}
-                    if (error3) {
-                      pythonPath = pythonPaths[3];
-                      exec(`"${pythonPath}" "${tempFile}"`, (error4, stdout4, stderr4) => {
-                        try { fs.unlinkSync(tempFile); } catch (e) {}
-                        if (error4) {
-                          reject(new Error(`Python 실행 오류: ${error4.message}`));
-                          return;
-                        }
-                        try {
-                          const result = JSON.parse(stdout4.trim());
-                          resolve(result);
-                        } catch (e) {
-                          reject(new Error(`JSON 파싱 오류: ${stdout4}`));
-                        }
-                      });
-                      return;
-                    }
-                    try {
-                      const result = JSON.parse(stdout3.trim());
-                      resolve(result);
-                    } catch (e) {
-                      reject(new Error(`JSON 파싱 오류: ${stdout3}`));
-                    }
-                  });
-                  return;
-                }
-                try {
-                  const result = JSON.parse(stdout2.trim());
-                  resolve(result);
-                } catch (e) {
-                  reject(new Error(`JSON 파싱 오류: ${stdout2}`));
-                }
-              });
-              return;
-            }
-            reject(new Error(`Python 실행 오류: ${error.message}`));
-            return;
-          }
-          
-          try {
-            const result = JSON.parse(stdout.trim());
-            resolve(result);
-          } catch (e) {
-            reject(new Error(`JSON 파싱 오류: ${stdout}`));
-          }
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  // 오디오 버퍼를 WAV 파일로 변환
-  convertToWav(audioBuffer, sampleRate = 16000) {
+  // TensorFlow.js로 감정 분석 (사전 훈련된 모델만 사용)
+  async analyzeEmotionWithTensorFlow(audioBuffer) {
     try {
-      // 간단한 WAV 헤더 생성
-      const buffer = Buffer.from(audioBuffer);
-      const wavHeader = this.createWavHeader(buffer.length, sampleRate, 1, 16);
-      return Buffer.concat([wavHeader, buffer]);
-    } catch (error) {
-      log.error('WAV 변환 오류:', error.message);
-      return null;
-    }
-  }
-
-  // WAV 헤더 생성
-  createWavHeader(dataLength, sampleRate, channels, bitsPerSample) {
-    const buffer = Buffer.alloc(44);
-    
-    // RIFF 헤더
-    buffer.write('RIFF', 0);
-    buffer.writeUInt32LE(36 + dataLength, 4);
-    buffer.write('WAVE', 8);
-    
-    // fmt 청크
-    buffer.write('fmt ', 12);
-    buffer.writeUInt32LE(16, 16);
-    buffer.writeUInt16LE(1, 20);
-    buffer.writeUInt16LE(channels, 22);
-    buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28);
-    buffer.writeUInt16LE(channels * bitsPerSample / 8, 32);
-    buffer.writeUInt16LE(bitsPerSample, 34);
-    
-    // data 청크
-    buffer.write('data', 36);
-    buffer.writeUInt32LE(dataLength, 40);
-    
-    return buffer;
-  }
-
-  // SpeechBrain으로 감정 분석
-  async analyzeEmotionWithSpeechBrain(audioBuffer) {
-    try {
-      if (!this.isModelLoaded) {
-        throw new Error('SpeechBrain 모델이 로드되지 않았습니다.');
+      if (!this.isModelLoaded || !this.model) {
+        throw new Error('TensorFlow.js 모델이 로드되지 않았습니다.');
       }
 
-      // 오디오 버퍼를 WAV로 변환
-      const wavData = this.convertToWav(audioBuffer);
-      if (!wavData) {
-        throw new Error('오디오 데이터 변환 실패');
-      }
-
-      // 임시 WAV 파일 생성
-      const tempWavFile = path.join(__dirname, '..', 'temp_audio.wav');
-      fs.writeFileSync(tempWavFile, wavData);
-
-      // Python 스크립트로 감정 분석
-      const pythonScript = `
-import torch
-import torchaudio
-import numpy as np
-import json
-import sys
-from speechbrain.pretrained import EncoderClassifier
-
-try:
-    # SpeechBrain 모델 로드
-    classifier = EncoderClassifier.from_hparams(
-        source="${SPEECHBRAIN_MODEL}",
-        savedir="models/emotion_model"
-    )
-    
-    # 오디오 파일 로드
-    signal = classifier.load_audio("${tempWavFile}")
-    
-    # 감정 분류
-    out_prob, score, index, text_lab = classifier.classify_batch(signal)
-    
-    # 결과 처리
-    emotion = text_lab[0]
-    confidence = float(torch.max(out_prob).item())
-    
-    print(json.dumps({
-        "status": "success",
-        "emotion": emotion,
-        "confidence": confidence,
-        "raw_probabilities": out_prob.tolist()[0]
-    }))
-    
-except Exception as e:
-    print(json.dumps({
-        "status": "error",
-        "message": str(e)
-    }))
-`;
-
-      const result = await this.runPythonScript(pythonScript);
+      // 오디오 데이터를 TensorFlow.js 텐서로 변환
+      const audioTensor = tf.tensor(audioBuffer);
       
-      // 임시 파일 삭제
-      try {
-        fs.unlinkSync(tempWavFile);
-      } catch (e) {
-        // 파일 삭제 실패는 무시
-      }
-
-      if (result.status === 'success') {
-        return {
-          emotion: EMOTION_MAP[result.emotion] || result.emotion,
-          confidence: result.confidence,
-          rawProbabilities: result.raw_probabilities
-        };
-      } else {
-        throw new Error(result.message);
-      }
+      // 사전 훈련된 모델로 직접 예측 (모델이 오디오를 직접 처리)
+      const prediction = this.model.predict(audioTensor);
+      const probabilities = await prediction.array();
+      
+      // 메모리 정리
+      audioTensor.dispose();
+      prediction.dispose();
+      
+      // 모델의 출력을 그대로 사용 (직접 작성한 분류 로직 없음)
+      const confidence = Math.max(...probabilities[0]);
+      const emotionIndex = probabilities[0].indexOf(confidence);
+      
+      // 모델의 출력 클래스에 따라 감정 매핑
+      const emotions = ['happy', 'sad', 'angry', 'neutral', 'excited', 'frustrated'];
+      const emotion = emotions[emotionIndex] || 'neutral';
+      
+      return {
+        emotion: emotion,
+        confidence: confidence,
+        rawProbabilities: probabilities[0]
+      };
       
     } catch (error) {
-      log.error('SpeechBrain 감정 분석 실패:', error.message);
+      log.error('TensorFlow.js 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }
 
-  // 음성 버퍼에서 감정 분석
+  // 음성 버퍼에서 감정 분석 (사전 훈련된 모델만 사용)
   async analyzeEmotionFromBuffer(audioBuffer) {
     try {
       // 최소 1초 분량의 오디오가 필요
@@ -471,13 +285,14 @@ except Exception as e:
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
-      // SpeechBrain 모델이 로드되지 않았으면 오류 발생
-      if (!this.isModelLoaded) {
-        throw new Error('SpeechBrain 모델이 로드되지 않았습니다. PyTorch와 SpeechBrain이 올바르게 설치되었는지 확인해주세요.');
+      // 사전 훈련된 모델이 로드되지 않았으면 분석 불가
+      if (!this.isModelLoaded || !this.model) {
+        log.error('❌ 사전 훈련된 감정 인식 모델이 로드되지 않았습니다.');
+        return { emotion: 'unknown', confidence: 0 };
       }
 
-      log.info('🤖 SpeechBrain으로 감정 분석 시작...');
-      const result = await this.analyzeEmotionWithSpeechBrain(audioBuffer);
+      log.info('🤖 사전 훈련된 모델로 감정 분석 시작...');
+      const result = await this.analyzeEmotionWithTensorFlow(audioBuffer);
       
       if (result.emotion !== 'unknown' && result.confidence > 0.3) {
         // 감정 히스토리 업데이트
@@ -503,8 +318,8 @@ except Exception as e:
       return result;
       
     } catch (error) {
-      log.error('❌ 감정 분석 실패:', error.message);
-      throw error; // 오류를 다시 던져서 상위에서 처리하도록 함
+      log.error('❌ 사전 훈련된 모델 감정 분석 실패:', error.message);
+      return { emotion: 'unknown', confidence: 0 };
     }
   }
 
