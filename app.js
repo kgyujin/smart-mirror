@@ -45,7 +45,7 @@ const {
   speechClient,
   isMicListening
 } = require('./js/speech');
-const { analyzeEmotionAudio, generateEmotionResponse } = require('./js/emotion');
+const { analyzeEmotionAudio, generateEmotionResponse, getEmotionBasedRecommendations } = require('./js/emotion');
 const { PersonalizationSystem } = require('./js/personalization');
 const { 
   ConversationContext, 
@@ -70,9 +70,9 @@ const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
 const personalizedRoutine = new PersonalizedRoutine();
 
-// 감정 분석 시스템 초기화 (더미 객체로 생성)
+// 감정 분석 시스템 초기화
 const emotionAnalysisSystem = {
-  analyze: () => ({ emotion: 'neutral', confidence: 0.5 }),
+  analyze: analyzeEmotionAudio,
   start: () => {},
   stop: () => {}
 };
