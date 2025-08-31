@@ -70,6 +70,13 @@ const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
 const personalizedRoutine = new PersonalizedRoutine();
 
+// 감정 분석 시스템 초기화 (더미 객체로 생성)
+const emotionAnalysisSystem = {
+  analyze: () => ({ emotion: 'neutral', confidence: 0.5 }),
+  start: () => {},
+  stop: () => {}
+};
+
 // WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
 
@@ -499,25 +506,25 @@ personalizationSystem.startMessageUpdates(broadcast, environmentalAwareness);
 
 // 상시 리스닝 시작
 if (ALWAYS_LISTEN) {
-      const dependencies = {
-      conversationContext,
-      personalizedRoutine,
-      personalizationSystem,
-      openai,
-      broadcast,
-      safeTTS,
-      parseRelativeDate,
-      isPureDateQuery,
-      formatKSTTime,
-      formatKSTDate,
-      processNewsQuery,
-      emotionAnalysisSystem
-    };
-    
-    startContinuousHotwordListener(
-      (text) => processRecognizedCommand(text, dependencies),
-      broadcast
-    );
+  const dependencies = {
+    conversationContext,
+    personalizedRoutine,
+    personalizationSystem,
+    openai,
+    broadcast,
+    safeTTS,
+    parseRelativeDate,
+    isPureDateQuery,
+    formatKSTTime,
+    formatKSTDate,
+    processNewsQuery,
+    emotionAnalysisSystem
+  };
+  
+  startContinuousHotwordListener(
+    (text) => processRecognizedCommand(text, dependencies),
+    broadcast
+  );
 }
 
 // 프로세스 종료 시 정리

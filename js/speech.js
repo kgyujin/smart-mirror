@@ -296,7 +296,13 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               }
             }
             
-            await processRecognizedCommand(finalCommand);
+            try {
+              await processRecognizedCommand(finalCommand);
+              log.info('명령 처리 완료');
+            } catch (error) {
+              log.error('명령 처리 중 오류:', error);
+            }
+            
             hotwordMode = 'hotword';
             lastTranscriptAt = Date.now();
             if (broadcast) {
