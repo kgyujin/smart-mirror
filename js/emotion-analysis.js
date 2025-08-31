@@ -199,43 +199,56 @@ class EmotionAnalysisSystem {
     try {
       log.info('🤖 사전 훈련된 경량 감정 인식 모델 로드 중...');
       
-      // 경량화된 CNN 모델 생성 (라즈베리파이 32비트 ARM 최적화)
+      // 개선된 경량화된 CNN 모델 (라즈베리파이 32비트 ARM 최적화)
       this.model = tf.sequential({
         layers: [
           // 입력층: 13개 MFCC 특성
           tf.layers.conv1d({
             inputShape: [13, 1],
-            filters: 8,
-            kernelSize: 3,
-            activation: 'relu',
-            padding: 'same'
-          }),
-          tf.layers.maxPooling1d({ poolSize: 2 }),
-          tf.layers.dropout({ rate: 0.25 }),
-          
-          // 두 번째 컨볼루션 층
-          tf.layers.conv1d({
             filters: 16,
             kernelSize: 3,
             activation: 'relu',
             padding: 'same'
           }),
+          tf.layers.batchNormalization(),
           tf.layers.maxPooling1d({ poolSize: 2 }),
-          tf.layers.dropout({ rate: 0.25 }),
+          tf.layers.dropout({ rate: 0.2 }),
           
-          // 글로벌 평균 풀링
+          // 두 번째 컨볼루션 층
+          tf.layers.conv1d({
+            filters: 32,
+            kernelSize: 3,
+            activation: 'relu',
+            padding: 'same'
+          }),
+          tf.layers.batchNormalization(),
+          tf.layers.maxPooling1d({ poolSize: 2 }),
+          tf.layers.dropout({ rate: 0.2 }),
+          
+          // 세 번째 컨볼루션 층
+          tf.layers.conv1d({
+            filters: 64,
+            kernelSize: 3,
+            activation: 'relu',
+            padding: 'same'
+          }),
+          tf.layers.batchNormalization(),
           tf.layers.globalAveragePooling1d(),
+          tf.layers.dropout({ rate: 0.3 }),
           
           // 완전 연결 층
+          tf.layers.dense({ units: 64, activation: 'relu' }),
+          tf.layers.batchNormalization(),
+          tf.layers.dropout({ rate: 0.4 }),
           tf.layers.dense({ units: 32, activation: 'relu' }),
-          tf.layers.dropout({ rate: 0.5 }),
+          tf.layers.dropout({ rate: 0.3 }),
           tf.layers.dense({ units: 7, activation: 'softmax' }) // 7가지 감정
         ]
       });
       
       // 모델 컴파일 (라즈베리파이 최적화)
       this.model.compile({
-        optimizer: tf.train.adam(0.001),
+        optimizer: tf.train.adam(0.0005), // 학습률 낮춤
         loss: 'categoricalCrossentropy',
         metrics: ['accuracy']
       });
@@ -589,15 +602,20 @@ class EmotionAnalysisSystem {
       input.dispose();
       prediction.dispose();
       
-      // 감정 분류 (7가지 감정)
+      // 감정 분류 (7가지 감정) - 개선된 신뢰도 계산
       const emotions = ['happy', 'sad', 'angry', 'neutral', 'excited', 'frustrated', 'fearful'];
       const maxIndex = probabilities[0].indexOf(Math.max(...probabilities[0]));
       const emotion = emotions[maxIndex] || 'neutral';
-      const confidence = Math.max(...probabilities[0]);
+      
+      // 개선된 신뢰도 계산: 최대값과 두 번째 최대값의 차이를 고려
+      const sortedProbs = [...probabilities[0]].sort((a, b) => b - a);
+      const maxProb = sortedProbs[0];
+      const secondMaxProb = sortedProbs[1];
+      const confidence = maxProb + (maxProb - secondMaxProb) * 0.5; // 신뢰도 보정
       
       return {
         emotion: emotion,
-        confidence: confidence,
+        confidence: Math.min(confidence, 1.0), // 최대 1.0으로 제한
         rawProbabilities: probabilities[0]
       };
       
@@ -665,7 +683,7 @@ class EmotionAnalysisSystem {
     }
   }
 
-  // 기본 감정 분석 (fallback)
+  // 기본 감정 분석 (fallback) - 개선된 버전
   analyzeBasicEmotion(audioBuffer) {
     try {
       if (!audioBuffer || audioBuffer.length < 16000) {
@@ -674,11 +692,29 @@ class EmotionAnalysisSystem {
 
       const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length / 2);
       
-      // 간단한 특징 분석
+      // 개선된 특징 분석
       let sum = 0;
       let zeroCrossings = 0;
       let maxAmplitude = 0;
       let variance = 0;
+      let energyVariability = 0;
+      
+      // 에너지 변화량 계산
+      const energyFrames = [];
+      const frameSize = 1024;
+      for (let i = 0; i < samples.length; i += frameSize) {
+        let frameEnergy = 0;
+        for (let j = 0; j < frameSize && i + j < samples.length; j++) {
+          frameEnergy += samples[i + j] * samples[i + j];
+        }
+        energyFrames.push(Math.sqrt(frameEnergy / frameSize));
+      }
+      
+      // 에너지 변동성 계산
+      if (energyFrames.length > 1) {
+        const meanEnergy = energyFrames.reduce((a, b) => a + b, 0) / energyFrames.length;
+        energyVariability = energyFrames.reduce((sum, energy) => sum + Math.pow(energy - meanEnergy, 2), 0) / energyFrames.length;
+      }
       
       for (let i = 0; i < samples.length; i++) {
         const absValue = Math.abs(samples[i]);
@@ -693,43 +729,52 @@ class EmotionAnalysisSystem {
       const avgVolume = sum / samples.length;
       const zeroCrossingRate = zeroCrossings / samples.length;
       const volumeVariability = maxAmplitude / avgVolume;
+      const normalizedEnergyVariability = Math.sqrt(energyVariability) / avgVolume;
       
       // 개선된 규칙 기반 감정 분류
       let emotion = 'neutral';
       let confidence = 0.5;
       
-      // 화난 감정 (높은 볼륨, 낮은 제로 크로싱)
-      if (avgVolume > 4000 && zeroCrossingRate < 0.08) {
+      // 화난 감정 (높은 볼륨, 낮은 제로 크로싱, 높은 에너지 변동성)
+      if (avgVolume > 5000 && zeroCrossingRate < 0.06 && normalizedEnergyVariability > 0.8) {
         emotion = 'angry';
-        confidence = 0.7;
+        confidence = 0.85;
       }
-      // 짜증난 감정 (중간 볼륨, 낮은 제로 크로싱)
-      else if (avgVolume > 3000 && avgVolume <= 4000 && zeroCrossingRate < 0.1) {
+      // 짜증난 감정 (중간-높은 볼륨, 낮은 제로 크로싱, 중간 에너지 변동성)
+      else if (avgVolume > 3500 && avgVolume <= 5000 && zeroCrossingRate < 0.08 && normalizedEnergyVariability > 0.5) {
         emotion = 'frustrated';
-        confidence = 0.6;
+        confidence = 0.75;
       }
-      // 행복한 감정 (높은 볼륨, 높은 제로 크로싱)
-      else if (avgVolume > 3500 && zeroCrossingRate > 0.12) {
+      // 행복한 감정 (높은 볼륨, 높은 제로 크로싱, 높은 에너지 변동성)
+      else if (avgVolume > 4000 && zeroCrossingRate > 0.15 && normalizedEnergyVariability > 0.6) {
         emotion = 'happy';
-        confidence = 0.7;
+        confidence = 0.80;
       }
-      // 흥분한 감정 (높은 볼륨, 높은 변동성)
-      else if (avgVolume > 3000 && volumeVariability > 3) {
+      // 흥분한 감정 (높은 볼륨, 높은 제로 크로싱, 매우 높은 에너지 변동성)
+      else if (avgVolume > 4500 && zeroCrossingRate > 0.12 && normalizedEnergyVariability > 1.0) {
         emotion = 'excited';
-        confidence = 0.6;
+        confidence = 0.85;
       }
-      // 슬픈 감정 (낮은 볼륨, 낮은 제로 크로싱)
-      else if (avgVolume < 2000 && zeroCrossingRate < 0.05) {
+      // 슬픈 감정 (낮은 볼륨, 낮은 제로 크로싱, 낮은 에너지 변동성)
+      else if (avgVolume < 2500 && zeroCrossingRate < 0.04 && normalizedEnergyVariability < 0.3) {
         emotion = 'sad';
-        confidence = 0.6;
+        confidence = 0.75;
       }
-      // 중립 (기본값)
+      // 두려운 감정 (낮은 볼륨, 중간 제로 크로싱, 중간 에너지 변동성)
+      else if (avgVolume < 3000 && zeroCrossingRate >= 0.04 && zeroCrossingRate < 0.08 && normalizedEnergyVariability < 0.5) {
+        emotion = 'fearful';
+        confidence = 0.70;
+      }
+      // 중립 (기본값) - 더 정확한 조건
+      else if (avgVolume >= 2500 && avgVolume <= 4000 && zeroCrossingRate >= 0.06 && zeroCrossingRate <= 0.12 && normalizedEnergyVariability >= 0.3 && normalizedEnergyVariability <= 0.7) {
+        emotion = 'neutral';
+        confidence = 0.65;
+      }
+      // 기본 중립
       else {
         emotion = 'neutral';
-        confidence = 0.5;
+        confidence = 0.50;
       }
-      
-      log.info(`🎭 기본 감정 분석 결과: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%, 볼륨: ${avgVolume.toFixed(0)}, ZCR: ${zeroCrossingRate.toFixed(3)})`);
       
       return { emotion, confidence };
       

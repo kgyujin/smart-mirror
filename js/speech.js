@@ -93,6 +93,7 @@ let listeningWindowInterval = null;
 let emotionAnalysisSystem = null;
 let currentAudioBuffer = null;
 let emotionAnalysisInterval = null;
+let isEmotionAnalysisActive = false; // 감정 분석 활성화 상태
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -104,61 +105,62 @@ const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   }
 };
 
-// 감정 분석 시작
+// 감정 분석 시작 (명령 모드에서만)
 const startEmotionAnalysis = (broadcast) => {
   if (emotionAnalysisInterval) {
     clearInterval(emotionAnalysisInterval);
   }
   
-  log.info('🎭 감정 분석 시작');
+  isEmotionAnalysisActive = true;
+  log.info('🎭 감정 분석 활성화 (명령 모드)');
   
-  // 3초마다 감정 분석 수행 (더 자주 분석)
+  // 명령 모드에서만 감정 분석 수행
   emotionAnalysisInterval = setInterval(async () => {
-    if (currentAudioBuffer && currentAudioBuffer.length > 16000) { // 최소 1초 분량
-      try {
-        log.info(`🎤 오디오 버퍼 크기: ${currentAudioBuffer.length} bytes`);
-        
-        const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
-        
+    if (!isEmotionAnalysisActive || !currentAudioBuffer || currentAudioBuffer.length < 16000) {
+      return;
+    }
+    
+    try {
+      const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
+      
+      // 신뢰도가 50% 이상일 때만 로그 출력
+      if (emotionResult.confidence > 0.5) {
         log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
         
-        if (emotionResult.emotion !== 'unknown' && emotionResult.confidence > 0.3) {
-          // 감정 기반 응답 생성
+        // 브로드캐스트로 감정 정보 전송
+        if (broadcast) {
           const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
             emotionResult.emotion, 
             emotionResult.confidence
           );
           
-          // 브로드캐스트로 감정 정보 전송
-          if (broadcast) {
-            broadcast({ 
-              type: 'emotion_analysis', 
-              emotion: emotionResult.emotion,
-              confidence: emotionResult.confidence,
-              response: emotionResponse.response,
-              recommendations: emotionResponse.recommendations
-            });
-          }
+          broadcast({ 
+            type: 'emotion_analysis', 
+            emotion: emotionResult.emotion,
+            confidence: emotionResult.confidence,
+            response: emotionResponse.response,
+            recommendations: emotionResponse.recommendations
+          });
         }
-        
-        // 버퍼 초기화
-        currentAudioBuffer = null;
-      } catch (error) {
-        log.error('❌ 감정 분석 실패:', error.message);
       }
-    } else {
-      log.debug('🎤 오디오 버퍼가 충분하지 않음');
+      
+      // 버퍼 초기화
+      currentAudioBuffer = null;
+    } catch (error) {
+      log.error('❌ 감정 분석 실패:', error.message);
     }
-  }, 3000); // 3초마다 분석
+  }, 2000); // 2초마다 분석 (더 빠른 반응)
 };
 
 // 감정 분석 중지
 const stopEmotionAnalysis = () => {
+  isEmotionAnalysisActive = false;
   if (emotionAnalysisInterval) {
     clearInterval(emotionAnalysisInterval);
     emotionAnalysisInterval = null;
   }
   currentAudioBuffer = null;
+  log.info('�� 감정 분석 비활성화');
 };
 
 const startListeningWindowTicker = (broadcast) => {
@@ -249,6 +251,9 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
           safeBeep();
           lastTranscriptAt = Date.now();
           startListeningWindowTicker(broadcast);
+          
+          // 명령 모드 시작 시 감정 분석 활성화
+          startEmotionAnalysis(broadcast);
           return;
         }
 
@@ -276,12 +281,29 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               broadcast({ type: 'status', status: 'processing' });
             }
             
+            // 명령 처리 전에 현재 감정 분석 결과 저장
+            let currentEmotion = null;
+            if (isEmotionAnalysisActive && currentAudioBuffer && currentAudioBuffer.length > 16000) {
+              try {
+                currentEmotion = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
+                if (currentEmotion.confidence > 0.3) {
+                  log.info(`🎭 명령 처리 시 감정: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
+                }
+              } catch (error) {
+                log.error('명령 처리 시 감정 분석 실패:', error.message);
+              }
+            }
+            
             await processRecognizedCommand(finalCommand);
             hotwordMode = 'hotword';
             lastTranscriptAt = Date.now();
             if (broadcast) {
               broadcast({ type: 'status', status: 'listening_off' });
             }
+            
+            // 명령 처리 완료 후 감정 분석 중지
+            stopEmotionAnalysis();
+            
             log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
           }
         }
@@ -305,22 +327,17 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       // 오디오 데이터를 감정 분석을 위해 버퍼에 저장
       if (currentAudioBuffer) {
         currentAudioBuffer = Buffer.concat([currentAudioBuffer, chunk]);
-        // 버퍼 크기 제한 (10초 분량)
-        if (currentAudioBuffer.length > 320000) { // 16kHz * 2 bytes * 10 seconds
-          currentAudioBuffer = currentAudioBuffer.slice(-160000); // 마지막 5초만 유지
+        // 버퍼 크기 제한 (5초 분량으로 줄임)
+        if (currentAudioBuffer.length > 160000) { // 16kHz * 2 bytes * 5 seconds
+          currentAudioBuffer = currentAudioBuffer.slice(-80000); // 마지막 2.5초만 유지
         }
       } else {
         currentAudioBuffer = chunk;
       }
-      
-      log.debug(`🎤 오디오 버퍼 크기: ${currentAudioBuffer.length} bytes`);
     })
     .pipe(recognizeStream);
     
   log.info('상시 듣기 시작(핫워드: "미러야")');
-  
-  // 감정 분석 시작
-  startEmotionAnalysis(broadcast);
   
   // 상시 리스닝 시작 상태 브로드캐스트
   if (broadcast) {
