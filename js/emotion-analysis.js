@@ -197,7 +197,7 @@ class EmotionAnalysisSystem {
   // 사전 훈련된 경량 모델 초기화
   async initializePreTrainedModel() {
     try {
-      log.info('🤖 사전 훈련된 경량 감정 인식 모델 로드 중...');
+      log.info('사전 훈련된 경량 감정 인식 모델 로드 중...');
       
       // 개선된 경량화된 CNN 모델 (라즈베리파이 32비트 ARM 최적화)
       this.model = tf.sequential({
@@ -253,11 +253,14 @@ class EmotionAnalysisSystem {
         metrics: ['accuracy']
       });
       
+      // 모델 가중치 초기화 (중요!)
+      await this.model.predict(tf.zeros([1, 13, 1])).dispose();
+      
       this.isModelLoaded = true;
-      log.info('✅ 사전 훈련된 경량 감정 분석 시스템 초기화 완료');
+      log.info('사전 훈련된 경량 감정 분석 시스템 초기화 완료');
       
     } catch (error) {
-      log.error('❌ 사전 훈련된 모델 초기화 실패:', error.message);
+      log.error('사전 훈련된 모델 초기화 실패:', error.message);
       this.isModelLoaded = false;
     }
   }
@@ -618,14 +621,14 @@ class EmotionAnalysisSystem {
       const diff2 = secondMaxProb - thirdMaxProb;
       const avgDiff = (diff1 + diff2) / 2;
       
-      // 신뢰도 보정
-      let confidence = Math.max(0.8, Math.min(0.98, maxProb + avgDiff * 0.4));
+      // 실제 신뢰도 계산 (최소 60%, 최대 95%)
+      let confidence = Math.max(0.6, Math.min(0.95, maxProb + avgDiff * 0.2));
       
-      // 확률 분포가 균등하면 중립으로 분류
-      if (diff1 < 0.15 && diff2 < 0.15) {
+      // 확률 분포가 균등하면 중립으로 분류 (더 엄격한 조건)
+      if (diff1 < 0.05 && diff2 < 0.05) {
         return {
           emotion: 'neutral',
-          confidence: 0.85,
+          confidence: 0.75,
           rawProbabilities: probabilities[0]
         };
       }
@@ -658,11 +661,11 @@ class EmotionAnalysisSystem {
 
       // TensorFlow 모델이 로드되지 않았으면 초기화 시도
       if (!this.isModelLoaded || !this.model) {
-        log.info('🔄 TensorFlow 모델 초기화 중...');
+        log.info('TensorFlow 모델 초기화 중...');
         await this.initializePreTrainedModel();
         
         if (!this.isModelLoaded || !this.model) {
-          log.error('❌ TensorFlow 모델 초기화 실패');
+          log.error('TensorFlow 모델 초기화 실패');
           return { emotion: 'unknown', confidence: 0 };
         }
       }
@@ -692,7 +695,7 @@ class EmotionAnalysisSystem {
       return result;
       
     } catch (error) {
-      log.error('❌ TensorFlow 감정 분석 실패:', error.message);
+      log.error('TensorFlow 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }
@@ -793,7 +796,7 @@ class EmotionAnalysisSystem {
       return { emotion, confidence };
       
     } catch (error) {
-      log.error('❌ 기본 감정 분석 실패:', error.message);
+      log.error('기본 감정 분석 실패:', error.message);
       return { emotion: 'unknown', confidence: 0 };
     }
   }

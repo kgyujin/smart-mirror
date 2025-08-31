@@ -112,7 +112,7 @@ const startEmotionAnalysis = (broadcast) => {
   }
   
   isEmotionAnalysisActive = true;
-  log.info('🎭 감정 분석 활성화 (명령 모드)');
+  log.info('감정 분석 활성화 (명령 모드)');
   
   // 명령 모드에서만 감정 분석 수행
   emotionAnalysisInterval = setInterval(async () => {
@@ -125,7 +125,7 @@ const startEmotionAnalysis = (broadcast) => {
       
       // 신뢰도가 50% 이상일 때만 로그 출력
       if (emotionResult.confidence > 0.5) {
-        log.info(`🎭 TensorFlow 감정 분석: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+        log.info(`TensorFlow 감정 분석: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
         
         // 브로드캐스트로 감정 정보 전송
         if (broadcast) {
@@ -147,7 +147,7 @@ const startEmotionAnalysis = (broadcast) => {
       // 버퍼 초기화
       currentAudioBuffer = null;
     } catch (error) {
-      log.error('❌ TensorFlow 감정 분석 실패:', error.message);
+      log.error('TensorFlow 감정 분석 실패:', error.message);
     }
   }, 2000); // 2초마다 분석
 };
@@ -160,7 +160,7 @@ const stopEmotionAnalysis = () => {
     emotionAnalysisInterval = null;
   }
   currentAudioBuffer = null;
-  log.info('�� 감정 분석 비활성화');
+  log.info('감정 분석 비활성화');
 };
 
 const startListeningWindowTicker = (broadcast) => {
@@ -287,7 +287,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               try {
                 currentEmotion = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
                 if (currentEmotion.confidence > 0.3) {
-                  log.info(`🎭 명령 처리 시 감정: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
+                  log.info(`명령 처리 시 감정: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
                 }
               } catch (error) {
                 log.error('명령 처리 시 감정 분석 실패:', error.message);

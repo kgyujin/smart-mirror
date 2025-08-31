@@ -44,11 +44,6 @@ function initWS() {
           emotion: msg.emotion,
           confidence: msg.confidence
         });
-        
-        // 감정 기반 응답이 있으면 자막으로 표시
-        if (msg.response) {
-          addCaption('assistant', msg.response, { autohideMs: 6000 });
-        }
       }
     } catch (e) {}
   };

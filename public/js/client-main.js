@@ -37,29 +37,19 @@ $('advice').addEventListener('click', async () => {
 // 감정 분석 결과 표시
 function displayEmotionAnalysis(emotionData) {
   if (emotionData.emotion && emotionData.confidence > 0.5) {
-    const emotionElement = document.getElementById('emotion-display');
-    if (!emotionElement) {
-      // 감정 표시 요소가 없으면 생성
-      const newEmotionElement = document.createElement('div');
-      newEmotionElement.id = 'emotion-display';
-      newEmotionElement.className = 'emotion-info';
-      newEmotionElement.innerHTML = `
-        <div class="emotion-icon">${getEmotionIcon(emotionData.emotion)}</div>
-        <div class="emotion-text">
-          <div class="emotion-label">${getEmotionLabel(emotionData.emotion)}</div>
-          <div class="emotion-confidence">${Math.round(emotionData.confidence * 100)}%</div>
-        </div>
-      `;
-      document.body.appendChild(newEmotionElement);
-    } else {
-      // 기존 요소 업데이트
-      emotionElement.innerHTML = `
-        <div class="emotion-icon">${getEmotionIcon(emotionData.emotion)}</div>
-        <div class="emotion-text">
-          <div class="emotion-label">${getEmotionLabel(emotionData.emotion)}</div>
-          <div class="emotion-confidence">${Math.round(emotionData.confidence * 100)}%</div>
-        </div>
-      `;
+    const emotionElement = document.getElementById('emotion');
+    if (emotionElement) {
+      // 감정 라벨 가져오기
+      const emotionLabel = getEmotionLabel(emotionData.emotion);
+      const confidence = Math.round(emotionData.confidence * 100);
+      
+      // 날짜 패널 아래에 감정 표시
+      emotionElement.textContent = `${emotionLabel} (${confidence}%)`;
+      
+      // 3초 후 자동으로 사라지게 설정
+      setTimeout(() => {
+        emotionElement.textContent = '';
+      }, 3000);
     }
   }
 }
@@ -85,10 +75,9 @@ function getEmotionLabel(emotion) {
     'happy': '행복',
     'sad': '슬픔',
     'angry': '분노',
-    'calm': '평온',
-    'surprised': '놀람',
+    'excited': '흥분',
+    'frustrated': '좌절',
     'fearful': '두려움',
-    'disgust': '혐오',
     'neutral': '중립'
   };
   return labels[emotion] || '알 수 없음';
