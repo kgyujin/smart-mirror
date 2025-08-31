@@ -3,7 +3,7 @@ const { PORT } = require('./config');
 const { log } = require('./logging');
 const { fetchWeatherData } = require('./weather');
 const { fetchTodayEvents, formatKSTTimeFromISO, fetchEventsForDay } = require('./calendar');
-const { EmotionAnalysisSystem } = require('./emotion-analysis');
+const { analyzeEmotionAudio, generateEmotionResponse, getEmotionBasedRecommendations } = require('./emotion');
 
 // 대화 컨텍스트 관리 시스템
 class ConversationContext {
@@ -699,16 +699,8 @@ const processRecognizedCommand = async (text, dependencies) => {
     const context = conversationContext.getUserContext(userId);
     const contextSummary = conversationContext.getContextSummary(userId);
     
-    // 감정 분석 결과 확인
+    // 감정 분석 결과 확인 (실시간 분석은 speech.js에서 처리됨)
     let currentEmotion = null;
-    if (emotionAnalysisSystem) {
-      currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
-      if (currentEmotion.emotion && currentEmotion.confidence > 0.3) {
-        // 감정 히스토리에 추가
-        conversationContext.addEmotionHistory(userId, currentEmotion.emotion, currentEmotion.confidence);
-        log.info(`감정 감지: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
-      }
-    }
     
     // 1단계: GPT로 질문 분류
     const questionClassification = await classifyUserQuestion(trimmed, openai);
@@ -849,16 +841,11 @@ const processRecognizedCommand = async (text, dependencies) => {
         break;
         
       case 'music':
-        if (emotionAnalysisSystem) {
-          const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
-          if (currentEmotion.emotion) {
-            const musicRecommendation = emotionAnalysisSystem.getMusicRecommendation(currentEmotion.emotion);
-            reply = addEmotionBasedResponse(`현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`, currentEmotion);
-          } else {
-            reply = addEmotionBasedResponse('기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?', currentEmotion);
-          }
+        if (currentEmotion && currentEmotion.emotion) {
+          const musicRecommendation = getMusicRecommendation(currentEmotion.emotion);
+          reply = addEmotionBasedResponse(`현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`, currentEmotion);
         } else {
-          reply = addEmotionBasedResponse('음악 추천 시스템이 준비되지 않았습니다.', currentEmotion);
+          reply = addEmotionBasedResponse('기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?', currentEmotion);
         }
         break;
         

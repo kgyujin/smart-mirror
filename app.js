@@ -45,7 +45,7 @@ const {
   speechClient,
   isMicListening
 } = require('./js/speech');
-const { EmotionAnalysisSystem } = require('./js/emotion-analysis');
+const { analyzeEmotionAudio, generateEmotionResponse } = require('./js/emotion');
 const { PersonalizationSystem } = require('./js/personalization');
 const { 
   ConversationContext, 
@@ -69,7 +69,6 @@ app.use(express.json());
 const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
 const personalizedRoutine = new PersonalizedRoutine();
-const emotionAnalysisSystem = new EmotionAnalysisSystem();
 
 // WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
@@ -417,12 +416,12 @@ app.post('/api/personalized-message/change', async (req, res) => {
 // 감정 분석 API
 app.get('/api/emotion', (req, res) => {
   try {
-    const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
+    // 현재는 실시간 감정 분석이므로 기본값 반환
     res.json({
-      emotion: currentEmotion.emotion,
-      confidence: currentEmotion.confidence,
-      history: currentEmotion.history,
-      trend: currentEmotion.trend,
+      emotion: 'unknown',
+      confidence: 0,
+      history: [],
+      trend: 'stable',
       timestamp: Date.now()
     });
   } catch (error) {
@@ -434,11 +433,11 @@ app.get('/api/emotion', (req, res) => {
 // 감정 기반 추천 API
 app.get('/api/emotion/recommendations', (req, res) => {
   try {
-    const currentEmotion = emotionAnalysisSystem.getCurrentEmotion();
-    if (currentEmotion.emotion) {
-      const recommendations = emotionAnalysisSystem.getEmotionBasedRecommendations(currentEmotion.emotion);
+    const { emotion } = req.query;
+    if (emotion && emotion !== 'unknown') {
+      const recommendations = getEmotionBasedRecommendations(emotion);
       res.json({
-        emotion: currentEmotion.emotion,
+        emotion: emotion,
         recommendations: recommendations,
         timestamp: Date.now()
       });

@@ -9,7 +9,13 @@ const {
   LISTENING_BROADCAST_INTERVAL_MS
 } = require('./config');
 const { log } = require('./logging');
-const { EmotionAnalysisSystem } = require('./emotion-analysis');
+const { analyzeEmotionAudio, generateEmotionResponse } = require('./emotion');
+
+// 감정 분석 관련 변수들
+let isEmotionAnalysisActive = false;
+let emotionAnalysisInterval = null;
+let currentAudioBuffer = null;
+let currentEmotion = null;
 
 const speechClient = new SpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
 
@@ -89,11 +95,7 @@ let lastTranscriptAt = 0;
 let commandBuffer = '';
 let listeningWindowInterval = null;
 
-// 감정 분석 시스템
-let emotionAnalysisSystem = null;
-let currentAudioBuffer = null;
-let emotionAnalysisInterval = null;
-let isEmotionAnalysisActive = false; // 감정 분석 활성화 상태
+// 감정 분석 시스템 (사전 훈련된 모델 사용)
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -121,15 +123,15 @@ const startEmotionAnalysis = (broadcast) => {
     }
     
     try {
-      const emotionResult = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
+      const emotionResult = await analyzeEmotionAudio(currentAudioBuffer);
       
       // 신뢰도가 50% 이상일 때만 로그 출력
       if (emotionResult.confidence > 0.5) {
-        log.info(`TensorFlow 감정 분석: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+        log.info(`사전 훈련된 모델 감정 분석: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
         
         // 브로드캐스트로 감정 정보 전송
         if (broadcast) {
-          const emotionResponse = emotionAnalysisSystem.generateEmotionResponse(
+          const emotionResponse = generateEmotionResponse(
             emotionResult.emotion, 
             emotionResult.confidence
           );
@@ -147,7 +149,7 @@ const startEmotionAnalysis = (broadcast) => {
       // 버퍼 초기화
       currentAudioBuffer = null;
     } catch (error) {
-      log.error('TensorFlow 감정 분석 실패:', error.message);
+      log.error('사전 훈련된 모델 감정 분석 실패:', error.message);
     }
   }, 2000); // 2초마다 분석
 };
@@ -285,7 +287,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
             let currentEmotion = null;
             if (isEmotionAnalysisActive && currentAudioBuffer && currentAudioBuffer.length > 16000) {
               try {
-                currentEmotion = await emotionAnalysisSystem.analyzeEmotionFromBuffer(currentAudioBuffer);
+                currentEmotion = await analyzeEmotionAudio(currentAudioBuffer);
                 if (currentEmotion.confidence > 0.3) {
                   log.info(`명령 처리 시 감정: ${currentEmotion.emotion} (신뢰도: ${(currentEmotion.confidence * 100).toFixed(1)}%)`);
                 }
