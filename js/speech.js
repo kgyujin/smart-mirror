@@ -125,7 +125,7 @@ const startEmotionAnalysis = (broadcast) => {
       
       // 신뢰도가 50% 이상일 때만 로그 출력
       if (emotionResult.confidence > 0.5) {
-        log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+        log.info(`🎭 TensorFlow 감정 분석: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
         
         // 브로드캐스트로 감정 정보 전송
         if (broadcast) {
@@ -147,9 +147,9 @@ const startEmotionAnalysis = (broadcast) => {
       // 버퍼 초기화
       currentAudioBuffer = null;
     } catch (error) {
-      log.error('❌ 감정 분석 실패:', error.message);
+      log.error('❌ TensorFlow 감정 분석 실패:', error.message);
     }
-  }, 2000); // 2초마다 분석 (더 빠른 반응)
+  }, 2000); // 2초마다 분석
 };
 
 // 감정 분석 중지

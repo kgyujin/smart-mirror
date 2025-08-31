@@ -607,15 +607,32 @@ class EmotionAnalysisSystem {
       const maxIndex = probabilities[0].indexOf(Math.max(...probabilities[0]));
       const emotion = emotions[maxIndex] || 'neutral';
       
-      // 개선된 신뢰도 계산: 최대값과 두 번째 최대값의 차이를 고려
+      // 신뢰도 계산
       const sortedProbs = [...probabilities[0]].sort((a, b) => b - a);
       const maxProb = sortedProbs[0];
       const secondMaxProb = sortedProbs[1];
-      const confidence = maxProb + (maxProb - secondMaxProb) * 0.5; // 신뢰도 보정
+      const thirdMaxProb = sortedProbs[2];
+      
+      // 신뢰도 계산: 최대값과 다른 값들의 차이를 종합적으로 고려
+      const diff1 = maxProb - secondMaxProb;
+      const diff2 = secondMaxProb - thirdMaxProb;
+      const avgDiff = (diff1 + diff2) / 2;
+      
+      // 신뢰도 보정
+      let confidence = Math.max(0.8, Math.min(0.98, maxProb + avgDiff * 0.4));
+      
+      // 확률 분포가 균등하면 중립으로 분류
+      if (diff1 < 0.15 && diff2 < 0.15) {
+        return {
+          emotion: 'neutral',
+          confidence: 0.85,
+          rawProbabilities: probabilities[0]
+        };
+      }
       
       return {
         emotion: emotion,
-        confidence: Math.min(confidence, 1.0), // 최대 1.0으로 제한
+        confidence: confidence,
         rawProbabilities: probabilities[0]
       };
       
@@ -625,34 +642,35 @@ class EmotionAnalysisSystem {
     }
   }
 
-  // 음성 버퍼에서 감정 분석
+  // 음성 버퍼에서 감정 분석 (TensorFlow 모델만 사용)
   async analyzeEmotionFromBuffer(audioBuffer) {
     try {
-      log.info(`🎤 감정 분석 시작 - 오디오 버퍼 크기: ${audioBuffer?.length || 0} bytes`);
-      
       // 최소 1초 분량의 오디오가 필요
       if (!audioBuffer || audioBuffer.length < 16000) {
-        log.info('🎤 오디오 버퍼가 충분하지 않음');
         return { emotion: 'unknown', confidence: 0 };
       }
 
-      // 너무 자주 분석하지 않도록 제한 (3초마다)
+      // 너무 자주 분석하지 않도록 제한 (2초마다)
       const now = Date.now();
-      if (now - this.lastAnalysisTime < 3000) {
-        log.debug('🎭 너무 자주 분석 요청됨, 이전 결과 반환');
+      if (now - this.lastAnalysisTime < 2000) {
         return this.currentEmotion || { emotion: 'unknown', confidence: 0 };
       }
 
-      // 사전 훈련된 모델이 로드되지 않았으면 기본 분석 사용
+      // TensorFlow 모델이 로드되지 않았으면 초기화 시도
       if (!this.isModelLoaded || !this.model) {
-        log.info('🔄 사전 훈련된 모델이 로드되지 않았습니다. 기본 분석을 사용합니다.');
-        return this.analyzeBasicEmotion(audioBuffer);
+        log.info('🔄 TensorFlow 모델 초기화 중...');
+        await this.initializePreTrainedModel();
+        
+        if (!this.isModelLoaded || !this.model) {
+          log.error('❌ TensorFlow 모델 초기화 실패');
+          return { emotion: 'unknown', confidence: 0 };
+        }
       }
 
-      log.info('🤖 사전 훈련된 모델로 감정 분석 시작...');
+      // TensorFlow 모델로 감정 분석 수행
       const result = await this.analyzeEmotionWithPreTrainedModel(audioBuffer);
       
-      if (result.emotion !== 'unknown' && result.confidence > 0.2) {
+      if (result.emotion !== 'unknown' && result.confidence > 0.3) {
         // 감정 히스토리 업데이트
         this.emotionHistory.push({
           emotion: result.emotion,
@@ -669,17 +687,13 @@ class EmotionAnalysisSystem {
         this.currentEmotion = result;
         this.emotionConfidence = result.confidence;
         this.lastAnalysisTime = now;
-        
-        log.info(`🎭 감정 인식: ${result.emotion} (신뢰도: ${(result.confidence * 100).toFixed(1)}%)`);
-      } else {
-        log.info(`🎭 감정 인식 실패: ${result.emotion} (신뢰도: ${(result.confidence * 100).toFixed(1)}%)`);
       }
       
       return result;
       
     } catch (error) {
-      log.error('❌ 감정 분석 실패:', error.message);
-      return this.analyzeBasicEmotion(audioBuffer);
+      log.error('❌ TensorFlow 감정 분석 실패:', error.message);
+      return { emotion: 'unknown', confidence: 0 };
     }
   }
 
