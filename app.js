@@ -45,7 +45,7 @@ const {
   speechClient,
   isMicListening
 } = require('./js/speech');
-const { analyzeEmotionAudio, generateEmotionResponse, getEmotionBasedRecommendations } = require('./js/emotion');
+
 const { PersonalizationSystem } = require('./js/personalization');
 const { 
   ConversationContext, 
@@ -70,12 +70,7 @@ const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
 const personalizedRoutine = new PersonalizedRoutine();
 
-// 감정 분석 시스템 초기화
-const emotionAnalysisSystem = {
-  analyze: analyzeEmotionAudio,
-  start: () => {},
-  stop: () => {}
-};
+
 
 // WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
@@ -356,8 +351,7 @@ app.post('/api/mic/toggle', (req, res) => {
       isPureDateQuery,
       formatKSTTime,
       formatKSTDate,
-      processNewsQuery,
-      emotionAnalysisSystem
+      processNewsQuery
     };
     
     startContinuousHotwordListener(
@@ -420,47 +414,7 @@ app.post('/api/personalized-message/change', async (req, res) => {
   }
 });
 
-// 감정 분석 API
-app.get('/api/emotion', (req, res) => {
-  try {
-    // 현재는 실시간 감정 분석이므로 기본값 반환
-    res.json({
-      emotion: 'unknown',
-      confidence: 0,
-      history: [],
-      trend: 'stable',
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    log.error('감정 분석 API 오류:', error);
-    res.status(500).json({ error: '감정 분석 정보를 가져오지 못했습니다.' });
-  }
-});
 
-// 감정 기반 추천 API
-app.get('/api/emotion/recommendations', (req, res) => {
-  try {
-    const { emotion } = req.query;
-    if (emotion && emotion !== 'unknown') {
-      const recommendations = getEmotionBasedRecommendations(emotion);
-      res.json({
-        emotion: emotion,
-        recommendations: recommendations,
-        timestamp: Date.now()
-      });
-    } else {
-      res.json({
-        emotion: 'unknown',
-        recommendations: null,
-        message: '아직 충분한 음성 데이터가 없습니다.',
-        timestamp: Date.now()
-      });
-    }
-  } catch (error) {
-    log.error('감정 추천 API 오류:', error);
-    res.status(500).json({ error: '감정 기반 추천을 가져오지 못했습니다.' });
-  }
-});
 
 // 헬스체크 API
 app.get('/api/health', (req, res) => {
@@ -517,8 +471,7 @@ if (ALWAYS_LISTEN) {
     isPureDateQuery,
     formatKSTTime,
     formatKSTDate,
-    processNewsQuery,
-    emotionAnalysisSystem
+    processNewsQuery
   };
   
   startContinuousHotwordListener(

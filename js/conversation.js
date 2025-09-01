@@ -3,7 +3,6 @@ const { PORT } = require('./config');
 const { log } = require('./logging');
 const { fetchWeatherData } = require('./weather');
 const { fetchTodayEvents, formatKSTTimeFromISO, fetchEventsForDay } = require('./calendar');
-const { analyzeEmotionAudio, generateEmotionResponse, getEmotionBasedRecommendations } = require('./emotion');
 
 // 대화 컨텍스트 관리 시스템
 class ConversationContext {
@@ -23,7 +22,6 @@ class ConversationContext {
         userIntent: null,
         followUpQuestions: [],
         routineContext: null,
-        emotionHistory: [], // 감정 히스토리
         conversationFlow: [], // 대화 흐름
         userPreferences: {}, // 사용자 선호도
         pendingActions: [] // 대기 중인 액션 (일정 등록 등)
@@ -99,26 +97,12 @@ class ConversationContext {
       recentMessages: context.messages.slice(-5), // 최근 5개 메시지
       followUpQuestions: context.followUpQuestions.slice(-2), // 최근 2개 후속 질문
       routineContext: context.routineContext,
-      emotionHistory: context.emotionHistory.slice(-3), // 최근 3개 감정
       conversationFlow: context.conversationFlow.slice(-5), // 최근 5개 대화 흐름
       pendingActions: context.pendingActions
     };
   }
 
-  // 감정 히스토리 추가
-  addEmotionHistory(userId, emotion, confidence) {
-    const context = this.getUserContext(userId);
-    context.emotionHistory.push({
-      emotion,
-      confidence,
-      timestamp: Date.now()
-    });
-    
-    // 최근 10개 감정만 유지
-    if (context.emotionHistory.length > 10) {
-      context.emotionHistory = context.emotionHistory.slice(-10);
-    }
-  }
+
 
   // 대화 흐름 추가
   addConversationFlow(userId, flow) {
@@ -287,106 +271,7 @@ const analyzeUserIntent = (text) => {
   return { type: 'general', confidence: 0.5 };
 };
 
-// 감정 기반 맥락 대화 처리
-const generateEmotionBasedContextualResponse = async (userText, emotionData, contextSummary, openai) => {
-  try {
-    if (!openai) return null;
 
-    const currentEmotion = emotionData?.emotion || 'neutral';
-    const confidence = emotionData?.confidence || 0.5;
-    
-    // 감정별 시스템 프롬프트 구성
-    const emotionPrompts = {
-      'sad': `당신은 공감적이고 따뜻한 상담사입니다. 사용자가 슬픈 감정을 표현할 때:
-- 진심으로 공감하고 위로해주세요
-- 구체적인 상황을 물어보세요
-- 실질적인 도움을 제안하세요
-- 부드럽고 따뜻한 톤을 유지하세요`,
-      
-      'angry': `당신은 차분하고 이해심 많은 상담사입니다. 사용자가 화난 감정을 표현할 때:
-- 분노를 인정하고 정당화해주세요
-- 차분하게 상황을 파악해주세요
-- 해결책을 함께 찾아보세요
-- 감정을 진정시킬 수 있는 방법을 제안하세요`,
-      
-      'happy': `당신은 진심으로 기뻐하는 친구입니다. 사용자가 행복한 감정을 표현할 때:
-- 진심으로 축하하고 함께 기뻐하세요
-- 긍정적인 에너지를 유지해주세요
-- 좋은 일에 대해 더 자세히 물어보세요
-- 그 기쁨을 계속 유지할 수 있도록 격려하세요`,
-      
-      'excited': `당신은 열정적인 친구입니다. 사용자가 흥분된 감정을 표현할 때:
-- 그 에너지에 함께 동참하세요
-- 구체적인 계획을 물어보세요
-- 긍정적인 에너지를 활용할 수 있도록 도와주세요`,
-      
-      'frustrated': `당신은 인내심 있는 상담사입니다. 사용자가 좌절감을 표현할 때:
-- 좌절감을 인정하고 공감해주세요
-- 문제를 단계별로 정리해주세요
-- 실질적인 해결책을 제안하세요`,
-      
-      'fearful': `당신은 안전감을 주는 상담사입니다. 사용자가 두려운 감정을 표현할 때:
-- 안전하다고 안심시켜주세요
-- 구체적인 걱정사항을 물어보세요
-- 해결책을 함께 찾아보세요`,
-      
-      'neutral': `당신은 친근한 대화 상대입니다. 사용자가 중립적인 감정을 표현할 때:
-- 자연스럽게 대화를 이어가세요
-- 관심사나 계획을 물어보세요
-- 실용적인 정보를 제공하세요`
-    };
-
-    const systemPrompt = `당신은 스마트 미러의 AI 비서입니다. 사용자의 감정과 대화 맥락을 고려하여 자연스럽고 도움이 되는 답변을 제공하세요.
-
-${emotionPrompts[currentEmotion] || emotionPrompts['neutral']}
-
-대화 규칙:
-- 이전 대화 맥락을 기억하고 자연스럽게 연결하세요
-- 사용자의 감정 상태에 맞는 톤을 유지하세요
-- 구체적이고 실용적인 정보를 제공하세요
-- 존댓말을 사용하되 친근하게 대화하세요
-- 필요시 일정 등록, 알림 설정 등 실질적인 도움을 제안하세요
-- 2-3문장으로 간결하게 답변하세요`;
-
-    // 대화 맥락 구성
-    const conversationContext = contextSummary.recentMessages?.map(msg => 
-      `${msg.role === 'user' ? '사용자' : '미러'}: ${msg.content}`
-    ).join('\n') || '';
-
-    const emotionContext = contextSummary.emotionHistory?.length > 0 ? 
-      `최근 감정 변화: ${contextSummary.emotionHistory.map(e => `${e.emotion}(${(e.confidence * 100).toFixed(0)}%)`).join(' → ')}` : '';
-
-    const pendingActions = contextSummary.pendingActions?.length > 0 ?
-      `대기 중인 액션: ${contextSummary.pendingActions.map(a => a.description).join(', ')}` : '';
-
-    const user = `현재 사용자 말: ${userText}
-현재 감정: ${currentEmotion} (신뢰도: ${(confidence * 100).toFixed(0)}%)
-
-이전 대화:
-${conversationContext}
-
-${emotionContext}
-${pendingActions}
-
-맥락에 맞는 자연스러운 답변을 생성해주세요.`;
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: user }
-      ],
-      temperature: 0.7,
-      max_tokens: 200,
-    });
-    
-    return completion.choices?.[0]?.message?.content?.trim() || '';
-  } catch (error) {
-    log.warn('감정 기반 맥락 응답 생성 실패:', error.message);
-  }
-  
-  return null;
-};
 
 const generateContextualResponse = async (userText, userIntent, contextSummary, openai) => {
   try {
@@ -584,7 +469,7 @@ const classifyUserQuestion = async (userText, openai) => {
 3. date - 날짜/요일 관련 질문 (오늘, 내일, 요일 등)
 4. schedule - 일정 관련 질문 (일정, 스케줄, 미팅, 약속 등)
 5. news - 뉴스 관련 질문
-6. emotion - 감정 표현 (짜증, 화남, 기쁨, 슬픔 등)
+6. general - 일반적인 대화
 7. music - 음악 관련 질문
 8. action - 액션 요청 (등록, 추가, 알림 등)
 9. general - 일반적인 대화
@@ -621,54 +506,14 @@ JSON 형태로 응답해주세요: {"type": "카테고리", "confidence": 0.0-1.
   if (/(오늘|내일|모레|요일|날짜)/.test(lowerText)) return { type: 'date', confidence: 0.7 };
   if (/(일정|스케줄|미팅|약속|회의)/.test(lowerText)) return { type: 'schedule', confidence: 0.8 };
   if (/뉴스/.test(lowerText)) return { type: 'news', confidence: 0.9 };
-  if (/(짜증|화남|기쁨|슬픔|화나|짜증나|스트레스)/.test(lowerText)) return { type: 'emotion', confidence: 0.8 };
+  
   if (/(음악|노래|플레이리스트)/.test(lowerText)) return { type: 'music', confidence: 0.8 };
   if (/(등록|추가|알림|리마인더)/.test(lowerText)) return { type: 'action', confidence: 0.8 };
   
   return { type: 'general', confidence: 0.5 };
 };
 
-// 감정 기반 응답 추가 함수
-const addEmotionBasedResponse = (baseReply, currentEmotion) => {
-  if (!currentEmotion || !currentEmotion.emotion || currentEmotion.confidence < 0.4) {
-    return baseReply;
-  }
 
-  const emotion = currentEmotion.emotion;
-  const confidence = currentEmotion.confidence;
-
-  // 감정별 추가 응답
-  const emotionAdditions = {
-    'angry': [
-      ' 혹시 무슨 일 있으세요? 괜찮으신가요?',
-      ' 심호흡을 하면 감정을 다루는 데 도움이 됩니다.',
-      ' 잠시 쉬어가시는 건 어떨까요?'
-    ],
-    'frustrated': [
-      ' 답답한 일이 있으신가요?',
-      ' 차분히 생각해보면 해결책이 보일 거예요.',
-      ' 잠시 다른 일에 집중해보세요.'
-    ],
-    'sad': [
-      ' 슬픈 일이 있으신가요?',
-      ' 따뜻한 차 한 잔 마시는 건 어떨까요?',
-      ' 혼자가 아니에요. 언제든 이야기해주세요.'
-    ],
-    'fearful': [
-      ' 불안한 일이 있으신가요?',
-      ' 안전한 곳에 계시니 걱정하지 마세요.',
-      ' 차분히 생각해보세요.'
-    ]
-  };
-
-  const additions = emotionAdditions[emotion];
-  if (additions && confidence > 0.5) {
-    const randomAddition = additions[Math.floor(Math.random() * additions.length)];
-    return baseReply + randomAddition;
-  }
-
-  return baseReply;
-};
 
 // 메인 대화 처리 함수
 const processRecognizedCommand = async (text, dependencies) => {
@@ -684,7 +529,7 @@ const processRecognizedCommand = async (text, dependencies) => {
     formatKSTTime,
     formatKSTDate,
     processNewsQuery,
-    emotionAnalysisSystem
+    
   } = dependencies;
   
   const trimmed = (text || '').trim();
@@ -699,8 +544,7 @@ const processRecognizedCommand = async (text, dependencies) => {
     const context = conversationContext.getUserContext(userId);
     const contextSummary = conversationContext.getContextSummary(userId);
     
-    // 감정 분석 결과 확인 (실시간 분석은 speech.js에서 처리됨)
-    let currentEmotion = null;
+    
     
     // 1단계: GPT로 질문 분류
     const questionClassification = await classifyUserQuestion(trimmed, openai);
@@ -711,16 +555,16 @@ const processRecognizedCommand = async (text, dependencies) => {
       case 'weather':
         try {
           const weatherData = await fetchWeatherData();
-          let weatherReply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
-          reply = addEmotionBasedResponse(weatherReply, currentEmotion);
-        } catch {
-          reply = addEmotionBasedResponse('날씨 정보를 불러오지 못했습니다.', currentEmotion);
-        }
+                     let weatherReply = `현재 ${weatherData.name} ${Math.round(weatherData.main.temp)}도, ${weatherData.weather?.[0]?.description || ''}입니다.`;
+           reply = weatherReply;
+                 } catch {
+           reply = '날씨 정보를 불러오지 못했습니다.';
+         }
         break;
         
       case 'time':
-        let timeReply = `현재 시각은 ${formatKSTTime()}입니다.`;
-        reply = addEmotionBasedResponse(timeReply, currentEmotion);
+                 let timeReply = `현재 시각은 ${formatKSTTime()}입니다.`;
+         reply = timeReply;
         break;
         
       case 'date':
@@ -730,14 +574,14 @@ const processRecognizedCommand = async (text, dependencies) => {
           
           if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
             const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
-            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`, currentEmotion);
-          } else {
-            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo)}입니다.`, currentEmotion);
-          }
-        } catch (error) {
-          log.error('날짜 처리 실패:', error.message);
-          reply = addEmotionBasedResponse('날짜 정보를 처리하는 데 실패했습니다.', currentEmotion);
-        }
+                         reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`;
+           } else {
+             reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
+           }
+                 } catch (error) {
+           log.error('날짜 처리 실패:', error.message);
+           reply = '날짜 정보를 처리하는 데 실패했습니다.';
+         }
         break;
         
       case 'schedule':
@@ -806,71 +650,55 @@ const processRecognizedCommand = async (text, dependencies) => {
               }
             }
             
-            if (responseParts.length === 1) {
-              reply = addEmotionBasedResponse(responseParts[0] + '.', currentEmotion);
-            } else if (responseParts.length === 2) {
-              reply = addEmotionBasedResponse(responseParts[0] + '이고, ' + responseParts[1] + '.', currentEmotion);
-            } else {
-              reply = addEmotionBasedResponse(responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.', currentEmotion);
-            }
-          } else {
-            reply = addEmotionBasedResponse(`${getKoreanDateInfo(dateInfo).split(' (')[0]} 등록된 일정이 없습니다.`, currentEmotion);
-          }
-        } catch (error) {
-          log.error('일정 처리 실패:', error.message);
-          reply = addEmotionBasedResponse('일정 정보를 처리하는 데 실패했습니다.', currentEmotion);
-        }
+                         if (responseParts.length === 1) {
+               reply = responseParts[0] + '.';
+             } else if (responseParts.length === 2) {
+               reply = responseParts[0] + '이고, ' + responseParts[1] + '.';
+             } else {
+               reply = responseParts.slice(0, -1).join(', ') + '이고, ' + responseParts[responseParts.length - 1] + '.';
+             }
+                     } else {
+             reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]} 등록된 일정이 없습니다.`;
+           }
+                 } catch (error) {
+           log.error('일정 처리 실패:', error.message);
+           reply = '일정 정보를 처리하는 데 실패했습니다.';
+         }
         break;
         
       case 'news':
-        try {
-          const newsRes = await processNewsQuery(trimmed);
-          reply = addEmotionBasedResponse(newsRes.response || '뉴스 정보를 불러올 수 없습니다.', currentEmotion);
-        } catch {
-          reply = addEmotionBasedResponse('뉴스 정보를 가져오는 데 실패했습니다.', currentEmotion);
-        }
+                 try {
+           const newsRes = await processNewsQuery(trimmed);
+           reply = newsRes.response || '뉴스 정보를 불러올 수 없습니다.';
+         } catch {
+           reply = '뉴스 정보를 가져오는 데 실패했습니다.';
+         }
         break;
         
-      case 'emotion':
-        // 감정 표현에 대한 공감적 응답
-        if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.4) {
-          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
-        } else {
-          reply = await answerWithGPT(trimmed, contextSummary, openai);
-        }
-        break;
+             
         
-      case 'music':
-        if (currentEmotion && currentEmotion.emotion) {
-          const musicRecommendation = getMusicRecommendation(currentEmotion.emotion);
-          reply = addEmotionBasedResponse(`현재 ${currentEmotion.emotion}한 기분이시니 ${musicRecommendation}을 추천드려요.`, currentEmotion);
-        } else {
-          reply = addEmotionBasedResponse('기분에 맞는 음악을 추천해드릴게요. 어떤 음악을 좋아하시나요?', currentEmotion);
-        }
-        break;
+             case 'music':
+         reply = '음악 추천 기능은 현재 개발 중입니다.';
+         break;
         
       case 'action':
         const actionIntent = analyzeActionIntent(trimmed, contextSummary);
         if (actionIntent.type === 'schedule_registration') {
           const scheduleResult = await handleScheduleRegistration(trimmed, contextSummary, dependencies);
-          reply = addEmotionBasedResponse(scheduleResult.message, currentEmotion);
+                     reply = scheduleResult.message;
           if (scheduleResult.success) {
             conversationContext.completePendingAction(userId, 'schedule_registration');
           }
-        } else {
-          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
-        }
+                 } else {
+           reply = await answerWithGPT(trimmed, contextSummary, openai);
+         }
         break;
         
-      case 'general':
-      default:
-        // 일반적인 대화는 GPT가 처리하되 감정 정보 포함
-        if (currentEmotion && currentEmotion.emotion && currentEmotion.confidence > 0.3) {
-          reply = await generateEmotionBasedContextualResponse(trimmed, currentEmotion, contextSummary, openai);
-        } else {
-          reply = await answerWithGPT(trimmed, contextSummary, openai);
-        }
-        break;
+             case 'general':
+       default:
+         // 일반적인 대화는 GPT가 처리
+         reply = await answerWithGPT(trimmed, contextSummary, openai);
+         break;
     }
     
     // 대화 컨텍스트에 메시지 추가
@@ -1234,9 +1062,7 @@ module.exports = {
   PersonalizedRoutine,
   analyzeUserIntent,
   generateContextualResponse,
-  generateEmotionBasedContextualResponse,
   classifyUserQuestion,
-  addEmotionBasedResponse,
   handleRoutineStep,
   generateRoutineSummary,
   handleScheduleRegistration,

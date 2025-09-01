@@ -34,54 +34,7 @@ $('advice').addEventListener('click', async () => {
   }
 });
 
-// 감정 분석 결과 표시
-function displayEmotionAnalysis(emotionData) {
-  if (emotionData.emotion && emotionData.confidence > 0.5) {
-    const emotionElement = document.getElementById('emotion');
-    if (emotionElement) {
-      // 감정 라벨 가져오기
-      const emotionLabel = getEmotionLabel(emotionData.emotion);
-      const confidence = Math.round(emotionData.confidence * 100);
-      
-      // 날짜 패널 아래에 감정 표시
-      emotionElement.textContent = `${emotionLabel} (${confidence}%)`;
-      
-      // 3초 후 자동으로 사라지게 설정
-      setTimeout(() => {
-        emotionElement.textContent = '';
-      }, 3000);
-    }
-  }
-}
 
-// 감정 아이콘 반환
-function getEmotionIcon(emotion) {
-  const icons = {
-    'happy': '😊',
-    'sad': '😢',
-    'angry': '😠',
-    'calm': '😌',
-    'surprised': '😲',
-    'fearful': '😨',
-    'disgust': '🤢',
-    'neutral': '😐'
-  };
-  return icons[emotion] || '😐';
-}
-
-// 감정 라벨 반환
-function getEmotionLabel(emotion) {
-  const labels = {
-    'happy': '행복',
-    'sad': '슬픔',
-    'angry': '분노',
-    'excited': '흥분',
-    'frustrated': '좌절',
-    'fearful': '두려움',
-    'neutral': '중립'
-  };
-  return labels[emotion] || '알 수 없음';
-}
 
 // 클릭 시 모든 자막 서서히 제거
 document.addEventListener('click', () => {

@@ -42,17 +42,7 @@
     #advice:empty { opacity: 0; }
     #advice:not(:empty) { opacity: 1; }
 
-    /* Emotion */
-    #emotion { 
-      margin-top: 8px; 
-      font-size: 16px; 
-      color: var(--success); 
-      font-weight: 500;
-      min-height: 1.2em;
-      transition: opacity 0.3s ease;
-    }
-    #emotion:empty { opacity: 0; }
-    #emotion:not(:empty) { opacity: 1; }
+    
 
     /* Weather */
     #weather .temp { font-size: 48px; font-weight: 700; }
