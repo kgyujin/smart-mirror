@@ -14,6 +14,11 @@ const CALENDAR_ICS_URLS = process.env.CALENDAR_ICS_URLS || '';
 const ETRI_API_KEY = process.env.ETRI_API_KEY || 'YOUR_ETRI_API_KEY';
 const ETRI_API_URL = 'http://epretx.etri.re.kr:8000/api/WiseASR_Recognition';
 
+// 음성인식 품질 개선 설정
+const AUDIO_CHUNK_SIZE = Number(process.env.AUDIO_CHUNK_SIZE || 20); // 오디오 청크 크기 (약 1초)
+const MIN_TEXT_LENGTH = Number(process.env.MIN_TEXT_LENGTH || 2); // 최소 텍스트 길이
+const MAX_CONSECUTIVE_EMPTY = Number(process.env.MAX_CONSECUTIVE_EMPTY || 10); // 최대 연속 빈 결과
+
 // 파일 경로 설정
 const CALENDAR_SOURCES_FILE = path.join(__dirname, '..', 'calendar_sources.json');
 
@@ -38,6 +43,9 @@ module.exports = {
   CALENDAR_SOURCES_FILE,
   ETRI_API_KEY,
   ETRI_API_URL,
+  AUDIO_CHUNK_SIZE,
+  MIN_TEXT_LENGTH,
+  MAX_CONSECUTIVE_EMPTY,
   CAPTION_HIDE_AFTER_TTS_MS,
   COMMAND_SILENCE_TIMEOUT_MS,
   LISTENING_BROADCAST_INTERVAL_MS,

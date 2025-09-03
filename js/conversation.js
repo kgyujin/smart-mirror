@@ -574,10 +574,13 @@ const processRecognizedCommand = async (text, dependencies) => {
           
           if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
             const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
-                         reply = `${getKoreanDateInfo(dateInfo).split(' (')[0]}는 ${weekday}입니다.`;
-           } else {
-             reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
-           }
+            const dateText = getKoreanDateInfo(dateInfo).split(' (')[0];
+            // 조사 처리: "내일"은 "은", "오늘"은 "은", "어제"는 "는"
+            const particle = (dateText === '내일' || dateText === '오늘' || dateText === '어제') ? '은' : '는';
+            reply = `${dateText}${particle} ${weekday}입니다.`;
+          } else {
+            reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
+          }
                  } catch (error) {
            log.error('날짜 처리 실패:', error.message);
            reply = '날짜 정보를 처리하는 데 실패했습니다.';

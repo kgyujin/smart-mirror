@@ -7,7 +7,10 @@ const {
   WAKEWORD_TEST, 
   WAKEWORD_REMOVE,
   COMMAND_SILENCE_TIMEOUT_MS,
-  LISTENING_BROADCAST_INTERVAL_MS
+  LISTENING_BROADCAST_INTERVAL_MS,
+  AUDIO_CHUNK_SIZE,
+  MIN_TEXT_LENGTH,
+  MAX_CONSECUTIVE_EMPTY
 } = require('./config');
 const { log } = require('./logging');
 
@@ -44,12 +47,32 @@ const convertAudioToText = async (audioBuffer) => {
       return null;
     }
   } catch (error) {
-    log.error('ETRI 음성인식 API 오류:', error.message);
     if (error.response) {
-      log.error('응답 상태:', error.response.status);
-      log.error('응답 데이터:', error.response.data);
+      const status = error.response.status;
+      const data = error.response.data;
+      
+      if (status === 429) {
+        log.warn('ETRI API 동시 요청 제한 도달. 잠시 대기 후 재시도합니다.');
+        // 429 에러 시 2초 대기
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return null;
+      } else if (status === 403) {
+        log.error('ETRI API 인증 실패 또는 일일 제한 초과:', data);
+        return null;
+      } else {
+        log.error('ETRI 음성인식 API 오류:', error.message, '상태:', status, '데이터:', data);
+        return null;
+      }
+    } else if (error.code === 'EAI_AGAIN') {
+      log.warn('ETRI API 서버 연결 실패 (DNS 오류). 잠시 후 재시도합니다.');
+      return null;
+    } else if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      log.warn('ETRI API 연결 타임아웃. 재시도합니다.');
+      return null;
+    } else {
+      log.error('ETRI 음성인식 API 오류:', error.message);
+      return null;
     }
-    return null;
   }
 };
 
@@ -81,6 +104,9 @@ let lastTranscriptAt = 0;
 let commandBuffer = '';
 let listeningWindowInterval = null;
 let audioChunks = [];
+let isProcessingAudio = false; // 중복 처리 방지
+let lastRecognizedText = ''; // 마지막 인식된 텍스트
+let consecutiveEmptyCount = 0; // 연속 빈 결과 카운트
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -106,6 +132,7 @@ const startListeningWindowTicker = (broadcast) => {
       hotwordMode = 'hotword';
       commandBuffer = '';
       audioChunks = [];
+      consecutiveEmptyCount = 0;
       stopListeningWindowTicker(true, broadcast);
       if (broadcast) {
         broadcast({ type: 'status', status: 'listening_timeout' });
@@ -121,6 +148,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
   hotwordMode = 'hotword';
   commandBuffer = '';
   audioChunks = [];
+  consecutiveEmptyCount = 0;
+  lastRecognizedText = '';
   lastTranscriptAt = Date.now();
 
   micInstance = record({
@@ -137,69 +166,98 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       // 오디오 청크 수집
       audioChunks.push(chunk);
       
-      // 일정 크기 이상 쌓이면 음성인식 시도
-      if (audioChunks.length >= 10) { // 약 0.5초 분량
+              // 일정 크기 이상 쌓이면 음성인식 시도 (약 1초 분량)
+        if (audioChunks.length >= AUDIO_CHUNK_SIZE && !isProcessingAudio) {
         const audioBuffer = Buffer.concat(audioChunks);
         audioChunks = []; // 버퍼 초기화
         
+        isProcessingAudio = true;
+        
         try {
           const transcription = await convertAudioToText(audioBuffer);
-          if (transcription) {
-            lastTranscriptAt = Date.now();
-            
-            log.verbose('음성 인식 결과:', transcription, 'mode:', hotwordMode);
-            
-            // 호출어 모드에서 호출어 인식
-            if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcription)) {
-              log.info('호출어 인식됨:', transcription);
-              hotwordMode = 'command';
-              commandBuffer = '';
-              audioChunks = [];
-              if (broadcast) {
-                broadcast({ type: 'status', status: 'listening_on' });
-              }
-              safeBeep();
-              lastTranscriptAt = Date.now();
-              startListeningWindowTicker(broadcast);
-            }
-
-            // 명령 모드에서 사용자 명령 처리
-            if (hotwordMode === 'command') {
-              // Only show live captions when in command mode and exclude wakewords
-              const cleanText = transcription.replace(WAKEWORD_REMOVE, '').trim();
-              if (cleanText && broadcast) {
-                broadcast({ type: 'transcript', role: 'user', text: cleanText, final: true, mode: hotwordMode });
-              }
-
-              // 최종 문장 확정 시에만 처리
-              if (cleanText) {
-                log.info('명령 인식됨:', cleanText);
-                commandBuffer = '';
-                audioChunks = [];
-                stopListeningWindowTicker(true, broadcast);
-                if (broadcast) {
-                  broadcast({ type: 'status', status: 'processing' });
-                }
-                
-                try {
-                  await processRecognizedCommand(cleanText);
-                  log.info('명령 처리 완료');
-                } catch (error) {
-                  log.error('명령 처리 중 오류:', error);
-                }
-                
-                hotwordMode = 'hotword';
+          
+          if (transcription && transcription.trim()) {
+            // 의미있는 텍스트인지 확인 (너무 짧거나 의미없는 단어 제외)
+            const cleanText = transcription.trim();
+            if (cleanText.length > MIN_TEXT_LENGTH && 
+                !/^[에이]+$/.test(cleanText) && // "에", "이" 같은 단일 음소 제외
+                !/^[가-힣]{1,2}$/.test(cleanText)) { // 1-2글자 한글 단어 제외
+              
+              // 이전 텍스트와 중복되지 않는지 확인
+              if (cleanText !== lastRecognizedText) {
+                lastRecognizedText = cleanText;
                 lastTranscriptAt = Date.now();
-                if (broadcast) {
-                  broadcast({ type: 'status', status: 'listening_off' });
-                }
+                consecutiveEmptyCount = 0;
                 
-                log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
+                log.verbose('음성 인식 결과:', cleanText, 'mode:', hotwordMode);
+                
+                // 호출어 모드에서 호출어 인식
+                if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(cleanText)) {
+                  log.info('호출어 인식됨:', cleanText);
+                  hotwordMode = 'command';
+                  commandBuffer = '';
+                  audioChunks = [];
+                  if (broadcast) {
+                    broadcast({ type: 'status', status: 'listening_on' });
+                  }
+                  safeBeep();
+                  lastTranscriptAt = Date.now();
+                  startListeningWindowTicker(broadcast);
+                }
+
+                // 명령 모드에서 사용자 명령 처리
+                if (hotwordMode === 'command') {
+                  // Only show live captions when in command mode and exclude wakewords
+                  const cleanCommand = cleanText.replace(WAKEWORD_REMOVE, '').trim();
+                  if (cleanCommand && broadcast) {
+                    broadcast({ type: 'transcript', role: 'user', text: cleanCommand, final: true, mode: hotwordMode });
+                  }
+
+                  // 최종 문장 확정 시에만 처리
+                  if (cleanCommand) {
+                    log.info('명령 인식됨:', cleanCommand);
+                    commandBuffer = '';
+                    audioChunks = [];
+                    stopListeningWindowTicker(true, broadcast);
+                    if (broadcast) {
+                      broadcast({ type: 'status', status: 'processing' });
+                    }
+                    
+                    try {
+                      await processRecognizedCommand(cleanCommand);
+                      log.info('명령 처리 완료');
+                    } catch (error) {
+                      log.error('명령 처리 중 오류:', error);
+                    }
+                    
+                    hotwordMode = 'hotword';
+                    lastTranscriptAt = Date.now();
+                    if (broadcast) {
+                      broadcast({ type: 'status', status: 'listening_off' });
+                    }
+                    
+                    log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
+                  }
+                }
               }
-            }
-          }
+                         } else {
+               consecutiveEmptyCount++;
+               if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY / 2) {
+                 log.verbose('의미없는 음성 인식 결과가 연속으로 발생하여 처리 중단');
+                 consecutiveEmptyCount = 0;
+               }
+             }
+           } else {
+             consecutiveEmptyCount++;
+             if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY) {
+               log.verbose('빈 음성 인식 결과가 연속으로 발생');
+               consecutiveEmptyCount = 0;
+             }
+           }
         } catch (error) {
           log.error('음성인식 처리 오류:', error);
+        } finally {
+          isProcessingAudio = false;
         }
       }
     });
@@ -221,6 +279,9 @@ const stopContinuousHotwordListener = (broadcast) => {
   hotwordMode = 'hotword';
   commandBuffer = '';
   audioChunks = [];
+  consecutiveEmptyCount = 0;
+  lastRecognizedText = '';
+  isProcessingAudio = false;
   if (broadcast) {
     broadcast({ type: 'status', status: 'listening_off' });
   }
