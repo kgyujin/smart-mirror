@@ -15,8 +15,7 @@ if (typeof dns.setDefaultResultOrder === 'function') {
 const { 
   PORT, 
   OPENAI_API_KEY, 
-  ALWAYS_LISTEN,
-  SPEECH_CREDENTIALS_PATH 
+  ALWAYS_LISTEN
 } = require('./js/config');
 const { log } = require('./js/logging');
 const { 
@@ -42,7 +41,6 @@ const {
   startContinuousHotwordListener, 
   stopContinuousHotwordListener,
   convertAudioToText,
-  speechClient,
   isMicListening
 } = require('./js/speech');
 
@@ -88,15 +86,9 @@ app.get('/api/weather', async (req, res) => {
   }
 });
 
-// Google Assistant API
+// ETRI 음성인식 기반 Assistant API
 app.get('/api/assistant', async (req, res) => {
   try {
-    if (!checkTokenExists()) {
-      return res.status(401).json({ 
-        error: '필요한 파일들이 없습니다. 설정을 확인해주세요.' 
-      });
-    }
-
     const outputPath = path.join(__dirname, 'user_input.wav');
     const fileWriter = new wav.FileWriter(outputPath, {
       channels: 1,
@@ -135,32 +127,24 @@ app.get('/api/assistant', async (req, res) => {
       fileWriter.end();
       mic.stop();
 
-      const file = fs.readFileSync(outputPath);
-      const audioBytes = file.toString('base64');
-
-      const request = {
-        audio: { content: audioBytes },
-        config: {
-          encoding: 'LINEAR16',
-          sampleRateHertz: 16000,
-          languageCode: 'ko-KR',
-        },
-      };
-
       try {
-        const [response] = await speechClient.recognize(request);
-        const transcription = response.results
-          .map(result => result.alternatives[0].transcript)
-          .join('\n');
+        const audioBuffer = fs.readFileSync(outputPath);
+        const transcription = await convertAudioToText(audioBuffer);
+        
+        if (!transcription) {
+          return sendResponse({ error: '음성을 인식할 수 없습니다.' });
+        }
+
         log.info('사용자 음성 인식 결과:', transcription);
 
         if (
-          transcription.toLowerCase().includes('ok google') ||
-          transcription.includes('오케이 구글')
+          transcription.toLowerCase().includes('미러야') ||
+          transcription.includes('밀어야') ||
+          transcription.includes('하이미러')
         ) {
           log.info('Assistant 트리거됨:', transcription);
 
-          const query = transcription.replace(/ok google|오케이 구글/gi, '').trim();
+          const query = transcription.replace(/(미러야|밀어야|하이미러)/gi, '').trim();
           log.info('추출된 쿼리:', query);
 
           if (isNewsQuery(query)) {
@@ -186,26 +170,23 @@ app.get('/api/assistant', async (req, res) => {
           }
 
           try {
-            const audioBuffer = fs.readFileSync(outputPath);
-            const pcmData = audioBuffer.slice(44);
+            log.info('ETRI 기반 대화 시스템과 실제 대화 시작...');
+            const assistantResponse = await conversateWithAssistant(null, query);
             
-            log.info('Google Assistant와 실제 대화 시작...');
-            const assistantResponse = await conversateWithAssistant(pcmData, query);
-            
-            log.info('✅ Google Assistant 실제 응답:', assistantResponse);
+            log.info('✅ ETRI 기반 대화 시스템 응답:', assistantResponse);
             safeTTS(assistantResponse, broadcast);
             
             sendResponse({ 
               response: assistantResponse,
               success: true,
-              source: 'google_assistant_enhanced',
+              source: 'etri_assistant',
               query: query
             });
             
           } catch (assistantError) {
-            log.error('Google Assistant 오류:', assistantError);
+            log.error('ETRI 기반 대화 시스템 오류:', assistantError);
             sendResponse({ 
-              error: 'Google Assistant 처리 실패: ' + assistantError.message,
+              error: '대화 처리 실패: ' + assistantError.message,
               query: query
             });
           }
@@ -214,7 +195,7 @@ app.get('/api/assistant', async (req, res) => {
           sendResponse({ response: `"${transcription}" → 어시스턴트 트리거 조건이 아닙니다.` });
         }
       } catch (err) {
-        log.error('STT 오류:', err);
+        log.error('음성인식 오류:', err);
         sendResponse({ error: '음성 인식 실패: ' + err.message });
       }
     }, 4000);
@@ -442,13 +423,9 @@ app.use((req, res) => {
 // 서버 시작
 const server = app.listen(PORT, () => {
   log.info(`서버 실행 중: http://localhost:${PORT}`);
-  log.info('Google Assistant 향상된 서비스 준비 완료');
+  log.info('ETRI 음성인식 기반 스마트 미러 서비스 준비 완료');
   
-  if (!checkTokenExists()) {
-    log.warn('필요한 파일들을 확인해주세요.');
-  } else {
-    log.info('✅ 모든 설정 파일이 확인되었습니다.');
-  }
+  log.info('✅ ETRI 음성인식 API 기반으로 설정되었습니다.');
 });
 
 // WebSocket 초기화

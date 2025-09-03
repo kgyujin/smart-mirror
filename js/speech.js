@@ -1,8 +1,9 @@
-const { SpeechClient } = require('@google-cloud/speech');
+const axios = require('axios');
 const record = require('node-record-lpcm16').record;
 const { exec } = require('child_process');
 const { 
-  SPEECH_CREDENTIALS_PATH, 
+  ETRI_API_KEY,
+  ETRI_API_URL,
   WAKEWORD_TEST, 
   WAKEWORD_REMOVE,
   COMMAND_SILENCE_TIMEOUT_MS,
@@ -10,10 +11,47 @@ const {
 } = require('./config');
 const { log } = require('./logging');
 
-
 let currentAudioBuffer = null;
 
-const speechClient = new SpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
+// ETRI 음성인식 API를 사용한 오디오-텍스트 변환 함수
+const convertAudioToText = async (audioBuffer) => {
+  try {
+    // 오디오 데이터를 base64로 인코딩
+    const audioBase64 = audioBuffer.toString('base64');
+    
+    const requestBody = {
+      request_id: "reserved field",
+      argument: {
+        language_code: "korean", // 한국어 기본 설정
+        audio: audioBase64
+      }
+    };
+
+    const response = await axios.post(ETRI_API_URL, requestBody, {
+      headers: {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': ETRI_API_KEY
+      },
+      timeout: 30000 // 30초 타임아웃
+    });
+
+    if (response.data.result === 0 && response.data.return_object) {
+      const recognizedText = response.data.return_object.recognized || '';
+      log.info('ETRI 음성인식 성공:', recognizedText);
+      return recognizedText;
+    } else {
+      log.error('ETRI 음성인식 실패:', response.data);
+      return null;
+    }
+  } catch (error) {
+    log.error('ETRI 음성인식 API 오류:', error.message);
+    if (error.response) {
+      log.error('응답 상태:', error.response.status);
+      log.error('응답 데이터:', error.response.data);
+    }
+    return null;
+  }
+};
 
 // Short beep on wake
 const safeBeep = () => {
@@ -28,53 +66,6 @@ const safeBeep = () => {
   } catch {}
 };
 
-// 개선된 오디오-텍스트 변환 함수
-const convertAudioToText = async (audioBuffer) => {
-  try {
-    const audioBytes = audioBuffer.toString('base64');
-    
-    // Speech Adaptation 적용
-    const request = {
-      audio: { content: audioBytes },
-      config: {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 16000,
-        languageCode: 'ko-KR',
-        // Speech Adaptation으로 정확도 향상
-        adaptation: {
-          phrase_sets: [
-            {
-              phrases: [
-                { value: "현재 시간", boost: 20 },
-                { value: "몇 시", boost: 20 },
-                { value: "시간", boost: 15 },
-                { value: "날씨", boost: 15 },
-                { value: "온도", boost: 15 },
-                { value: "서울", boost: 10 },
-                { value: "대한민국", boost: 10 },
-                { value: "수도", boost: 10 }
-              ]
-            }
-          ]
-        },
-        // 모델 선택 최적화
-        model: 'latest_long',
-        useEnhanced: true
-      },
-    };
-
-    const [response] = await speechClient.recognize(request);
-    const transcription = response.results
-      .map(result => result.alternatives[0].transcript)
-      .join(' ');
-    
-    return transcription;
-  } catch (error) {
-    log.error('오디오-텍스트 변환 오류:', error);
-    return null;
-  }
-};
-
 // 유틸: 호출어만 말했는지 판별
 const isWakewordOnly = (text) => {
   if (!text) return false;
@@ -85,11 +76,11 @@ const isWakewordOnly = (text) => {
 // 음성 인식 상태 관리
 let isMicListening = false;
 let hotwordMode = 'hotword'; // 'hotword' | 'command'
-let recognizeStream = null;
 let micInstance = null;
 let lastTranscriptAt = 0;
 let commandBuffer = '';
 let listeningWindowInterval = null;
+let audioChunks = [];
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -114,6 +105,7 @@ const startListeningWindowTicker = (broadcast) => {
       // 타임아웃: 명령 모드 종료
       hotwordMode = 'hotword';
       commandBuffer = '';
+      audioChunks = [];
       stopListeningWindowTicker(true, broadcast);
       if (broadcast) {
         broadcast({ type: 'status', status: 'listening_timeout' });
@@ -128,115 +120,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
   isMicListening = true;
   hotwordMode = 'hotword';
   commandBuffer = '';
+  audioChunks = [];
   lastTranscriptAt = Date.now();
-
-
-
-  const request = {
-    config: {
-      encoding: 'LINEAR16',
-      sampleRateHertz: 16000,
-      languageCode: 'ko-KR',
-      adaptation: {
-        phrase_sets: [
-          { phrases: [
-            { value: '미러야', boost: 40 },
-            { value: '밀어야', boost: 35 },
-            { value: '하이 미러', boost: 35 },
-            { value: '하이미러', boost: 35 },
-            { value: 'Hi Mirror', boost: 35 }
-          ] }
-        ]
-      },
-      model: 'latest_long',
-      useEnhanced: true,
-    },
-    interimResults: true,
-  };
-
-  recognizeStream = speechClient
-    .streamingRecognize(request)
-    .on('error', (err) => {
-      log.error('스트리밍 STT 오류:', err.message);
-      if (broadcast) {
-        broadcast({ type: 'status', status: 'stt_error', message: err.message });
-      }
-      stopContinuousHotwordListener(broadcast);
-      setTimeout(() => startContinuousHotwordListener(processRecognizedCommand, broadcast), 3000);
-    })
-    .on('data', async (data) => {
-      try {
-        const result = data.results?.[0];
-        if (!result) return;
-        const transcript = result.alternatives?.[0]?.transcript || '';
-        const isFinal = !!result.isFinal;
-        if (!transcript) return;
-        lastTranscriptAt = Date.now();
-        
-        log.verbose('음성 인식 결과:', transcript, 'isFinal:', isFinal, 'mode:', hotwordMode);
-        
-        // 호출어 모드에서 호출어 인식
-        if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcript)) {
-          log.info('호출어 인식됨:', transcript);
-          hotwordMode = 'command';
-          commandBuffer = '';
-          if (broadcast) {
-            broadcast({ type: 'status', status: 'listening_on' });
-          }
-          safeBeep();
-          lastTranscriptAt = Date.now();
-          startListeningWindowTicker(broadcast);
-        }
-
-        // 명령 모드에서 사용자 명령 처리
-        if (hotwordMode === 'command') {
-          // Only show live captions when in command mode and exclude wakewords
-          const cleanText = transcript.replace(WAKEWORD_REMOVE, '').trim();
-          if (cleanText && broadcast) {
-            broadcast({ type: 'transcript', role: 'user', text: cleanText, final: isFinal, mode: hotwordMode });
-          }
-
-          // 최종 문장 확정 시에만 처리
-          if (isFinal) {
-            const finalCommand = transcript.replace(WAKEWORD_REMOVE, '').trim();
-            // 호출어만 인식되었거나 아직 내용이 없는 경우에는 계속 대기
-            if (!finalCommand) {
-              lastTranscriptAt = Date.now();
-              return;
-            }
-            
-            log.info('명령 인식됨:', finalCommand);
-            commandBuffer = '';
-            stopListeningWindowTicker(true, broadcast);
-            if (broadcast) {
-              broadcast({ type: 'status', status: 'processing' });
-            }
-            
-
-
-            
-            try {
-              await processRecognizedCommand(finalCommand);
-              log.info('명령 처리 완료');
-            } catch (error) {
-              log.error('명령 처리 중 오류:', error);
-            }
-            
-            hotwordMode = 'hotword';
-            lastTranscriptAt = Date.now();
-            if (broadcast) {
-              broadcast({ type: 'status', status: 'listening_off' });
-            }
-            
-
-            
-            log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
-          }
-        }
-      } catch (e) {
-        log.error('STT 데이터 처리 오류:', e);
-      }
-    });
 
   micInstance = record({
     sampleRateHertz: 16000,
@@ -248,7 +133,76 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
   
   micInstance.stream()
     .on('error', (err) => log.error('마이크 오류:', err))
-    .pipe(recognizeStream);
+    .on('data', async (chunk) => {
+      // 오디오 청크 수집
+      audioChunks.push(chunk);
+      
+      // 일정 크기 이상 쌓이면 음성인식 시도
+      if (audioChunks.length >= 10) { // 약 0.5초 분량
+        const audioBuffer = Buffer.concat(audioChunks);
+        audioChunks = []; // 버퍼 초기화
+        
+        try {
+          const transcription = await convertAudioToText(audioBuffer);
+          if (transcription) {
+            lastTranscriptAt = Date.now();
+            
+            log.verbose('음성 인식 결과:', transcription, 'mode:', hotwordMode);
+            
+            // 호출어 모드에서 호출어 인식
+            if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(transcription)) {
+              log.info('호출어 인식됨:', transcription);
+              hotwordMode = 'command';
+              commandBuffer = '';
+              audioChunks = [];
+              if (broadcast) {
+                broadcast({ type: 'status', status: 'listening_on' });
+              }
+              safeBeep();
+              lastTranscriptAt = Date.now();
+              startListeningWindowTicker(broadcast);
+            }
+
+            // 명령 모드에서 사용자 명령 처리
+            if (hotwordMode === 'command') {
+              // Only show live captions when in command mode and exclude wakewords
+              const cleanText = transcription.replace(WAKEWORD_REMOVE, '').trim();
+              if (cleanText && broadcast) {
+                broadcast({ type: 'transcript', role: 'user', text: cleanText, final: true, mode: hotwordMode });
+              }
+
+              // 최종 문장 확정 시에만 처리
+              if (cleanText) {
+                log.info('명령 인식됨:', cleanText);
+                commandBuffer = '';
+                audioChunks = [];
+                stopListeningWindowTicker(true, broadcast);
+                if (broadcast) {
+                  broadcast({ type: 'status', status: 'processing' });
+                }
+                
+                try {
+                  await processRecognizedCommand(cleanText);
+                  log.info('명령 처리 완료');
+                } catch (error) {
+                  log.error('명령 처리 중 오류:', error);
+                }
+                
+                hotwordMode = 'hotword';
+                lastTranscriptAt = Date.now();
+                if (broadcast) {
+                  broadcast({ type: 'status', status: 'listening_off' });
+                }
+                
+                log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
+              }
+            }
+          }
+        } catch (error) {
+          log.error('음성인식 처리 오류:', error);
+        }
+      }
+    });
     
   log.info('상시 듣기 시작(핫워드: "미러야")');
   
@@ -261,15 +215,12 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
 const stopContinuousHotwordListener = (broadcast) => {
   if (!isMicListening) return;
   try { if (micInstance) micInstance.stop(); } catch {}
-  try { if (recognizeStream) recognizeStream.destroy(); } catch {}
-  
-
   
   micInstance = null;
-  recognizeStream = null;
   isMicListening = false;
   hotwordMode = 'hotword';
   commandBuffer = '';
+  audioChunks = [];
   if (broadcast) {
     broadcast({ type: 'status', status: 'listening_off' });
   }
@@ -277,7 +228,6 @@ const stopContinuousHotwordListener = (broadcast) => {
 };
 
 module.exports = {
-  speechClient,
   safeBeep,
   convertAudioToText,
   isWakewordOnly,
@@ -286,5 +236,4 @@ module.exports = {
   isMicListening,
   startListeningWindowTicker,
   stopListeningWindowTicker,
-
 };

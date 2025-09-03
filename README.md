@@ -1,136 +1,130 @@
-# Smart Mirror (mirror-app)
+# Smart Mirror Application
 
-AI 기반 한국어 스마트 미러 애플리케이션으로, 음성 인식, TTS, 개인화, 날씨/뉴스/일정 표시 등의 기능을 제공합니다.
+스마트 미러를 위한 Node.js 기반 애플리케이션입니다.
 
-| 항목 | 버전/설명 |
-| --- | -------- |
-| Node.js |  |
-| Express.js |  |
-| OpenAI GPT | 자연어 대화 처리 |
-| Google Cloud API | 음성 인식 |
-| WebSocket | 실시간 통신 |
+## 주요 기능
 
-## 기능
 | 기능 | 설명 |
-| --- | --- |
-| 음성 인식 | "미러야", "하이 미러" 웨이크워드로 음성 명령 수신 |
-| TTS 음성 합성 | Google Cloud TTS로 자연스러운 한국어 음성 출력 |
-| AI 대화 | OpenAI GPT 기반 맥락적 대화 및 루틴 처리 |
-| 날씨 정보 | OpenWeatherMap API 기반 실시간 날씨 표시 |
-| 일정 관리 | Google Calendar 연동으로 일정 표시 |
-| 뉴스 | RSS 피드 기반 최신 뉴스 제공 |
-| 개인화 | 사용자 패턴 학습 및 맞춤형 메시지 생성 |
-| 대화 컨텍스트 | 이전 대화 기억 및 후속 질문 처리 |
-| 웹 인터페이스 | 실시간 정보 표시 및 채팅 기능 |
-| 루틴 시스템 | 아침/업무/저녁 루틴 자동화 |
-| 날짜 시간 처리 | 상대적 날짜 파싱 및 KST 기준 시간 표시 |
-| Google Assistant 연동 | gRPC 기반 Google Assistant 대화 |
+|------|------|
+| 음성 인식 | ETRI 음성인식 API를 통한 한국어 음성 명령 인식 |
+| TTS 음성 합성 | espeak를 통한 한국어 음성 출력 |
+| 일정 관리 | ICS 파일 기반 일정 표시 |
+| 날씨 정보 | OpenWeatherMap API를 통한 실시간 날씨 정보 |
+| 뉴스 표시 | RSS 피드를 통한 최신 뉴스 표시 |
+| 개인화 시스템 | 사용자 맞춤형 메시지 및 루틴 |
+| 대화 시스템 | 간단한 대화 처리 및 명령 실행 |
 
-## 구조
-```
-mirror-app/
-├─ css/
-│  └─ main.css
-├─ js/
-│  ├─ assistant.js
-│  ├─ calendar.js
-│  ├─ config.js
-│  ├─ conversation.js
+## 설치 및 설정
 
-│  ├─ frontend/
-│  │  ├─ client-captions.js
-│  │  ├─ client-chat.js
-│  │  ├─ client-data.js
-│  │  ├─ client-main.js
-│  │  ├─ client-render.js
-│  │  ├─ client-ui.js
-│  │  └─ client-websocket.js
-│  ├─ logging.js
-│  ├─ news.js
-│  ├─ personalization.js
-│  ├─ speech.js
-│  ├─ tts.js
-│  ├─ weather.js
-│  └─ websocket.js
+### 1. 의존성 설치
 
-├─ public/
-│  └─ index.html
-├─ app.js.backup
-├─ app.js
-└─ README.md
+```bash
+npm install
 ```
 
-## 환경변수(.env) 설정
+### 2. 환경 변수 설정
+
+`.env` 파일을 생성하고 다음 내용을 추가하세요:
 
 ```env
-# 서버 설정
+# 서버 포트
 PORT=3000
 
-# OpenAI API
-OPENAI_API_KEY=
+# OpenAI API 키 (선택사항)
+OPENAI_API_KEY=your_openai_api_key_here
 
-# 날씨 API (OpenWeatherMap)
-WEATHER_API_KEY=
-CITY_ID=1835848  # 서울
+# 날씨 API 설정
+WEATHER_API_KEY=your_openweathermap_api_key_here
+CITY_ID=1835848
 
-# 음성 인식/합성
-ALWAYS_LISTEN=true
+# ICS 캘린더 URL (쉼표로 구분)
+CALENDAR_ICS_URLS=https://example.com/calendar1.ics,https://example.com/calendar2.ics
 
-# TTS 설정 (선택사항)
-TTS_VOICE=ko-KR-Wavenet-A
-TTS_RATE=1.0
-TTS_PITCH=0.0
+# ETRI 음성인식 API 키
+ETRI_API_KEY=your_etri_api_key_here
+
+# TTS 설정
 CAPTION_HIDE_AFTER_TTS_MS=3000
 
-# 캘린더 (선택사항)
-CALENDAR_ICS_URLS=https://example.com/calendar.ics
+# 상시 듣기 모드
+ALWAYS_LISTEN=true
 ```
 
-## 사용 방법
-1. `.env` 파일에 환경변수 설정
-2. Google Cloud 인증 파일 배치
-   - `credentials.json`: Google Calendar OAuth2 인증 정보
-   - `tokens.json`: Google Calendar 액세스 토큰
-   - `credentials_serviceAccount.json`: Google Cloud Speech/TTS 서비스 계정 키
-   - `google/assistant/embedded/v1alpha2/embedded_assistant.proto`: Google Assistant gRPC proto 파일
-3. 의존성 설치
-   ```bash
-   npm install
-   ```
-    
-   
-   
-4. 서버 실행
-   ```bash
-   # 방법 1: 자동 스크립트 (가상환경 자동 활성화)
-   chmod +x start_smart_mirror.sh
-   ./start_smart_mirror.sh
-   
-   # 방법 2: 수동 실행
-   node app.js
-   ```
-  5. 웹 인터페이스 접속
-   ```
-   http://localhost:3000
-   ```
+### 3. ETRI 음성인식 API 키 발급
+
+1. [ETRI e-PreTX](https://epretx.etri.re.kr/apiDetail?id=88) 사이트에 접속
+2. 회원가입 및 로그인
+3. API 키 발급 신청
+4. 발급받은 API 키를 `.env` 파일의 `ETRI_API_KEY`에 설정
+
+### 4. ICS 캘린더 설정 (선택사항)
+
+`calendar_sources.json` 파일을 생성하고 ICS URL을 추가하세요:
+
+```json
+{
+  "ical": [
+    "https://example.com/calendar1.ics",
+    "https://example.com/calendar2.ics"
+  ]
+}
+```
+
+## 실행
+
+```bash
+npm start
+```
+
+서버가 시작되면 `http://localhost:3000`에서 접근할 수 있습니다.
+
+## 음성 명령
+
+### 호출어
+- "미러야"
+- "밀어야"
+- "하이미러"
+
+### 기본 명령
+- "현재 시간 알려줘"
+- "오늘 날씨는?"
+- "뉴스 보여줘"
+- "일정 확인해줘"
 
 ## API 엔드포인트
 
-| 엔드포인트 | 메서드 | 설명 |
-|------------|--------|------|
-| `/api/weather` | GET | 현재 날씨 정보 |
-| `/api/time` | GET | 현재 시간/날짜 |
-| `/api/calendar/today` | GET | 오늘 일정 |
-| `/api/news` | GET/POST | 뉴스 정보 |
-| `/api/chat` | POST | 텍스트 대화 처리 |
-| `/api/mic/toggle` | POST | 마이크 토글 |
-| `/api/personalized-message` | GET | 개인화 메시지 |
-| `/api/personalized-message/change` | POST | 개인화 메시지 변경 |
-| `/api/summary` | GET | 일일 요약 |
-| `/api/health` | GET | 서버 상태 체크 |
+- `GET /api/weather` - 현재 날씨 정보
+- `GET /api/time` - 현재 시간 정보
+- `GET /api/news` - 최신 뉴스
+- `POST /api/news` - 뉴스 질문 처리
+- `GET /api/calendar/today` - 오늘 일정
+- `GET /api/assistant` - 음성 기반 어시스턴트
 
-## 참고
-- 애플리케이션이 정상적으로 동작하려면 OpenAI API 키와 Google Cloud 인증 파일이 필요합니다.
-- 음성 인식 기능을 사용하려면 마이크 하드웨어와 권한 설정이 필요합니다.
-- 웹 인터페이스는 `http://localhost:3000`에서 접속할 수 있습니다.
-- 로그는 서버 실행 시 콘솔에 출력됩니다.
+## 기술 스택
+
+- **백엔드**: Node.js, Express
+- **음성인식**: ETRI 음성인식 API
+- **TTS**: espeak
+- **웹소켓**: ws
+- **AI**: OpenAI GPT (선택사항)
+
+## 제약사항
+
+- ETRI 음성인식 API는 하루 1,000건으로 제한됩니다
+- 음성 파일은 20초 이내여야 합니다
+- 샘플링 주파수는 16kHz를 권장합니다
+
+## 문제 해결
+
+### 음성인식이 안 되는 경우
+1. ETRI API 키가 올바르게 설정되었는지 확인
+2. 마이크 권한 확인
+3. 오디오 드라이버 상태 확인
+
+### TTS가 작동하지 않는 경우
+1. espeak 설치 확인
+2. 오디오 출력 장치 확인
+
+## 라이선스
+
+ISC License

@@ -1,39 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const { OAuth2Client } = require('google-auth-library');
-const { google } = require('googleapis');
 const ical = require('node-ical');
 const { 
   CALENDAR_SOURCES_FILE,
-  CREDENTIALS_PATH,
-  TOKEN_PATH,
   CALENDAR_ICS_URLS
 } = require('./config');
 const { log } = require('./logging');
 
-// ========== Google Calendar 연동 ==========
-const getOAuth2ClientForCalendar = () => {
-  try {
-    const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
-    const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH));
-    const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
-    const oauth2Client = new OAuth2Client(client_id, client_secret, redirect_uris?.[0]);
-    oauth2Client.setCredentials(tokens);
-    return oauth2Client;
-  } catch (error) {
-    log.error('Calendar OAuth2 초기화 오류:', error);
-    return null;
-  }
-};
-
-const getTodayDateRangeISO = () => {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
-};
-
-// 캘린더 소스 로딩: 파일 > ENV > 구글 API
+// 캘린더 소스 로딩: 파일 > ENV
 const loadCalendarSources = () => {
   try {
     if (fs.existsSync(CALENDAR_SOURCES_FILE)) {
@@ -45,7 +19,7 @@ const loadCalendarSources = () => {
   } catch (e) { log.warn('calendar_sources.json 읽기 실패:', e.message); }
   const envUrls = CALENDAR_ICS_URLS.split(',').map(s => s.trim()).filter(Boolean);
   if (envUrls.length > 0) return { type: 'ical', urls: envUrls };
-  return { type: 'google' };
+  return { type: 'none' };
 };
 
 const getKSTNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
@@ -181,58 +155,10 @@ const fetchEventsForDay = async (targetDate = null) => {
     const { start, end } = getKstDayRangeFor(base);
     return fetchEventsFromICSInRange(source.urls, start, end);
   }
-  const oauth2Client = getOAuth2ClientForCalendar();
-  if (!oauth2Client) throw new Error('캘린더 인증 없음');
-  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
   
-  // KST 기준으로 날짜 범위 설정
-  const base = targetDate ? new Date(targetDate) : getKSTNow();
-  const { start, end } = getKstDayRangeFor(base);
-  
-  const resp = await calendar.events.list({
-    calendarId: 'primary',
-    timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
-    singleEvents: true,
-    orderBy: 'startTime',
-    maxResults: 50,
-  });
-  const events = (resp.data.items || []).map((ev) => {
-    const start = ev.start?.dateTime || ev.start?.date;
-    const end = ev.end?.dateTime || ev.end?.date;
-    const isAllDay = !!(ev.start?.date && !ev.start?.dateTime);
-    
-    // 하루종일 일정 처리 (오전 12:00 ~ 오전 12:00)
-    let processedStart = start;
-    let processedEnd = end;
-    let processedIsAllDay = isAllDay;
-    
-    if (!isAllDay && start && end) {
-      const startTime = new Date(start);
-      const endTime = new Date(end);
-      const startHour = startTime.getHours();
-      const endHour = endTime.getHours();
-      
-      // 오전 12:00 ~ 오전 12:00 패턴 감지
-      if (startHour === 0 && endHour === 0 && 
-          startTime.getMinutes() === 0 && endTime.getMinutes() === 0 &&
-          startTime.getDate() === endTime.getDate()) {
-        processedIsAllDay = true;
-      }
-    }
-    
-    return {
-      id: ev.id,
-      summary: ev.summary || '(제목 없음)',
-      start: processedStart,
-      end: processedEnd,
-      isAllDay: processedIsAllDay,
-      hangoutLink: ev.hangoutLink,
-      location: ev.location,
-      htmlLink: ev.htmlLink,
-    };
-  });
-  return events;
+  // ICS 소스가 없는 경우 빈 배열 반환
+  log.warn('ICS 캘린더 소스가 설정되지 않았습니다.');
+  return [];
 };
 
 const fetchTodayEvents = async () => fetchEventsForDay();
@@ -320,8 +246,6 @@ const buildDayContext = async () => {
 };
 
 module.exports = {
-  getOAuth2ClientForCalendar,
-  getTodayDateRangeISO,
   loadCalendarSources,
   getKSTNow,
   getKstDayRange,

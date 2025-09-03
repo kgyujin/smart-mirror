@@ -10,12 +10,12 @@ const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 const CITY_ID = process.env.CITY_ID;
 const CALENDAR_ICS_URLS = process.env.CALENDAR_ICS_URLS || '';
 
+// ETRI 음성인식 API 설정
+const ETRI_API_KEY = process.env.ETRI_API_KEY || 'YOUR_ETRI_API_KEY';
+const ETRI_API_URL = 'http://epretx.etri.re.kr:8000/api/WiseASR_Recognition';
+
 // 파일 경로 설정
 const CALENDAR_SOURCES_FILE = path.join(__dirname, '..', 'calendar_sources.json');
-const CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials.json');
-const TOKEN_PATH = path.join(__dirname, '..', 'tokens.json');
-const SPEECH_CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials_serviceAccount.json');
-const PROTO_PATH = path.join(__dirname, '..', 'test/google/assistant/embedded/v1alpha2/embedded_assistant.proto');
 
 // TTS 설정
 const CAPTION_HIDE_AFTER_TTS_MS = Number(process.env.CAPTION_HIDE_AFTER_TTS_MS || 3000);
@@ -28,9 +28,6 @@ const LISTENING_BROADCAST_INTERVAL_MS = 1000;
 const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/i; // for .test
 const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
 
-// Google Assistant 설정
-const ASSISTANT_ENDPOINT = 'embeddedassistant.googleapis.com:443';
-
 module.exports = {
   PORT,
   OPENAI_API_KEY,
@@ -39,14 +36,11 @@ module.exports = {
   CITY_ID,
   CALENDAR_ICS_URLS,
   CALENDAR_SOURCES_FILE,
-  CREDENTIALS_PATH,
-  TOKEN_PATH,
-  SPEECH_CREDENTIALS_PATH,
-  PROTO_PATH,
+  ETRI_API_KEY,
+  ETRI_API_URL,
   CAPTION_HIDE_AFTER_TTS_MS,
   COMMAND_SILENCE_TIMEOUT_MS,
   LISTENING_BROADCAST_INTERVAL_MS,
   WAKEWORD_TEST,
-  WAKEWORD_REMOVE,
-  ASSISTANT_ENDPOINT
+  WAKEWORD_REMOVE
 };

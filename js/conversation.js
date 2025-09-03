@@ -409,7 +409,7 @@ const handleScheduleRegistration = async (userText, contextSummary, dependencies
       }
     }
     
-    // 일정 등록 (실제로는 Google Calendar API 호출)
+    // 일정 등록 (현재는 가상 일정으로 처리)
     const scheduleDate = new Date(targetDate);
     scheduleDate.setHours(hour, minute, 0, 0);
     
