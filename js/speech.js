@@ -53,8 +53,8 @@ const convertAudioToText = async (audioBuffer) => {
       
       if (status === 429) {
         log.warn('ETRI API 동시 요청 제한 도달. 잠시 대기 후 재시도합니다.');
-        // 429 에러 시 2초 대기
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 429 에러 시 3초 대기 (더 긴 대기 시간)
+        await new Promise(resolve => setTimeout(resolve, 3000));
         return null;
       } else if (status === 403) {
         log.error('ETRI API 인증 실패 또는 일일 제한 초과:', data);
@@ -107,6 +107,8 @@ let audioChunks = [];
 let isProcessingAudio = false; // 중복 처리 방지
 let lastRecognizedText = ''; // 마지막 인식된 텍스트
 let consecutiveEmptyCount = 0; // 연속 빈 결과 카운트
+let lastRecognitionTime = 0; // 마지막 인식 시간
+let recognitionCooldown = 1000; // 인식 간 최소 대기 시간 (1초)
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -150,7 +152,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
   audioChunks = [];
   consecutiveEmptyCount = 0;
   lastRecognizedText = '';
-  lastTranscriptAt = Date.now();
+  lastRecognitionTime = 0;
+  isProcessingAudio = false;
 
   micInstance = record({
     sampleRateHertz: 16000,
@@ -166,8 +169,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       // 오디오 청크 수집
       audioChunks.push(chunk);
       
-              // 일정 크기 이상 쌓이면 음성인식 시도 (약 1초 분량)
-        if (audioChunks.length >= AUDIO_CHUNK_SIZE && !isProcessingAudio) {
+      // 일정 크기 이상 쌓이면 음성인식 시도 (약 1초 분량)
+      if (audioChunks.length >= AUDIO_CHUNK_SIZE && !isProcessingAudio) {
         const audioBuffer = Buffer.concat(audioChunks);
         audioChunks = []; // 버퍼 초기화
         
@@ -177,16 +180,32 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
           const transcription = await convertAudioToText(audioBuffer);
           
           if (transcription && transcription.trim()) {
-            // 의미있는 텍스트인지 확인 (너무 짧거나 의미없는 단어 제외)
+            // 의미있는 텍스트인지 확인 (더 엄격한 필터링)
             const cleanText = transcription.trim();
+            const now = Date.now();
+            
+            // 인식 간 최소 대기 시간 확인
+            if (now - lastRecognitionTime < recognitionCooldown) {
+              log.verbose('인식 간격이 너무 짧음, 건너뜀');
+              isProcessingAudio = false;
+              return;
+            }
+            
+            // 더 엄격한 텍스트 품질 검사
             if (cleanText.length > MIN_TEXT_LENGTH && 
                 !/^[에이]+$/.test(cleanText) && // "에", "이" 같은 단일 음소 제외
-                !/^[가-힣]{1,2}$/.test(cleanText)) { // 1-2글자 한글 단어 제외
+                !/^[가-힣]{1,2}$/.test(cleanText) && // 1-2글자 한글 단어 제외
+                !/^[가-힣]{3,4}$/.test(cleanText) && // 3-4글자 한글 단어도 제외 (의미없는 단어들)
+                !/^(이거|그거|저거|뭐야|어때|그래|맞아|아니|응|네|아|오|우와)$/.test(cleanText)) { // 의미없는 단어들 제외
               
-              // 이전 텍스트와 중복되지 않는지 확인
-              if (cleanText !== lastRecognizedText) {
+              // 이전 텍스트와 중복되지 않는지 확인 (더 엄격하게)
+              if (cleanText !== lastRecognizedText && 
+                  !cleanText.includes(lastRecognizedText) && 
+                  !lastRecognizedText.includes(cleanText)) {
+                
                 lastRecognizedText = cleanText;
-                lastTranscriptAt = Date.now();
+                lastRecognitionTime = now;
+                lastTranscriptAt = now;
                 consecutiveEmptyCount = 0;
                 
                 log.verbose('음성 인식 결과:', cleanText, 'mode:', hotwordMode);
@@ -201,7 +220,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                     broadcast({ type: 'status', status: 'listening_on' });
                   }
                   safeBeep();
-                  lastTranscriptAt = Date.now();
+                  lastTranscriptAt = now;
                   startListeningWindowTicker(broadcast);
                 }
 
@@ -231,7 +250,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                     }
                     
                     hotwordMode = 'hotword';
-                    lastTranscriptAt = Date.now();
+                    lastTranscriptAt = now;
                     if (broadcast) {
                       broadcast({ type: 'status', status: 'listening_off' });
                     }
@@ -239,21 +258,23 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                     log.verbose('명령 처리 완료, 호출어 대기 모드로 복귀');
                   }
                 }
+              } else {
+                log.verbose('중복 또는 유사한 텍스트 인식, 건너뜀:', cleanText);
               }
-                         } else {
-               consecutiveEmptyCount++;
-               if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY / 2) {
-                 log.verbose('의미없는 음성 인식 결과가 연속으로 발생하여 처리 중단');
-                 consecutiveEmptyCount = 0;
-               }
-             }
-           } else {
-             consecutiveEmptyCount++;
-             if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY) {
-               log.verbose('빈 음성 인식 결과가 연속으로 발생');
-               consecutiveEmptyCount = 0;
-             }
-           }
+            } else {
+              consecutiveEmptyCount++;
+              if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY / 2) {
+                log.verbose('의미없는 음성 인식 결과가 연속으로 발생하여 처리 중단');
+                consecutiveEmptyCount = 0;
+              }
+            }
+          } else {
+            consecutiveEmptyCount++;
+            if (consecutiveEmptyCount > MAX_CONSECUTIVE_EMPTY) {
+              log.verbose('빈 음성 인식 결과가 연속으로 발생');
+              consecutiveEmptyCount = 0;
+            }
+          }
         } catch (error) {
           log.error('음성인식 처리 오류:', error);
         } finally {
@@ -281,6 +302,7 @@ const stopContinuousHotwordListener = (broadcast) => {
   audioChunks = [];
   consecutiveEmptyCount = 0;
   lastRecognizedText = '';
+  lastRecognitionTime = 0;
   isProcessingAudio = false;
   if (broadcast) {
     broadcast({ type: 'status', status: 'listening_off' });

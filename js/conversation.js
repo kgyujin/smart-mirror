@@ -572,7 +572,16 @@ const processRecognizedCommand = async (text, dependencies) => {
           const dateInfo = parseRelativeDate(trimmed);
           const lowerQuery = trimmed.toLowerCase();
           
-          if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
+          // dateInfo가 null이거나 date가 없는 경우 기본값으로 오늘 사용
+          if (!dateInfo || !dateInfo.date) {
+            const todayInfo = parseRelativeDate('오늘');
+            if (todayInfo && todayInfo.date) {
+              const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][todayInfo.date.getDay()];
+              reply = `오늘은 ${weekday}입니다.`;
+            } else {
+              reply = '날짜 정보를 가져올 수 없습니다.';
+            }
+          } else if (/(요일|무슨\s*요일)/.test(lowerQuery)) {
             const weekday = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][dateInfo.date.getDay()];
             const dateText = getKoreanDateInfo(dateInfo).split(' (')[0];
             // 조사 처리: "내일"은 "은", "오늘"은 "은", "어제"는 "는"
@@ -581,10 +590,10 @@ const processRecognizedCommand = async (text, dependencies) => {
           } else {
             reply = `${getKoreanDateInfo(dateInfo)}입니다.`;
           }
-                 } catch (error) {
-           log.error('날짜 처리 실패:', error.message);
-           reply = '날짜 정보를 처리하는 데 실패했습니다.';
-         }
+        } catch (error) {
+          log.error('날짜 처리 실패:', error.message);
+          reply = '날짜 정보를 처리하는 데 실패했습니다.';
+        }
         break;
         
       case 'schedule':

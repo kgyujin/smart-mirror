@@ -14,11 +14,13 @@ const getTTSActive = () => isTTSActive;
 
 // TTS 제어
 let currentTTSProcess = null;
+let currentTTSProcessId = null;
 
 const stopTTS = () => {
   try {
     if (currentTTSProcess) {
       log.tts('중단 요청');
+      
       if (process.platform === 'win32') {
         try { 
           process.kill(currentTTSProcess.pid); 
@@ -29,13 +31,32 @@ const stopTTS = () => {
           });
         } catch {}
       } else {
+        // Linux/macOS에서 더 안정적인 프로세스 종료
         try { 
-          currentTTSProcess.kill('SIGKILL'); 
+          if (currentTTSProcess.pid) {
+            process.kill(currentTTSProcess.pid, 'SIGTERM');
+            // SIGTERM으로 종료되지 않으면 SIGKILL 사용
+            setTimeout(() => {
+              try {
+                process.kill(currentTTSProcess.pid, 'SIGKILL');
+              } catch {}
+            }, 1000);
+          }
         } catch {}
+        
         try {
-          // Linux에서 espeak 프로세스 강제 종료
-          exec(`pkill -f "espeak.*${currentTTSProcess.pid}"`, (err) => {
-            if (err) log.warn('Linux TTS 프로세스 종료 실패:', err.message);
+          // espeak 프로세스 강제 종료 (더 안정적인 방법)
+          if (currentTTSProcessId) {
+            exec(`kill -9 ${currentTTSProcessId} 2>/dev/null`, (err) => {
+              if (err) log.warn('Linux TTS 프로세스 강제 종료 실패:', err.message);
+            });
+          }
+          
+          // espeak 관련 프로세스 모두 종료
+          exec('pkill -f "espeak" 2>/dev/null', (err) => {
+            if (err && err.code !== 1) { // 1은 프로세스를 찾을 수 없음을 의미
+              log.warn('Linux espeak 프로세스 종료 실패:', err.message);
+            }
           });
         } catch {}
       }
@@ -44,6 +65,7 @@ const stopTTS = () => {
     log.error('TTS 중단 오류:', e);
   } finally {
     currentTTSProcess = null;
+    currentTTSProcessId = null;
     isTTSActive = false; // 강제 중단 시에도 상태 초기화
   }
 };
@@ -57,7 +79,7 @@ const safeTTS = async (text, broadcast) => {
     log.tts('이전 TTS 중단 후 새 TTS 시작');
     stopTTS();
     // 프로세스 완전 종료 대기
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
   
   log.tts('시작:', text);
@@ -81,17 +103,25 @@ const safeTTS = async (text, broadcast) => {
       }
     });
     
+    // 프로세스 ID 저장 (Linux에서 종료 시 사용)
+    if (currentTTSProcess && currentTTSProcess.pid) {
+      currentTTSProcessId = currentTTSProcess.pid;
+    }
+    
     if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
       currentTTSProcess.on('exit', () => { 
         currentTTSProcess = null; 
+        currentTTSProcessId = null;
         isTTSActive = false;
       });
       currentTTSProcess.on('close', () => { 
         currentTTSProcess = null; 
+        currentTTSProcessId = null;
         isTTSActive = false;
       });
       currentTTSProcess.on('error', () => { 
         currentTTSProcess = null; 
+        currentTTSProcessId = null;
         isTTSActive = false;
       });
     }
