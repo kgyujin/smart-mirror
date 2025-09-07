@@ -93,7 +93,9 @@ const safeBeep = () => {
 const isWakewordOnly = (text) => {
   if (!text) return false;
   const normalized = text.replace(/[\s.,!?~]+/g, '').toLowerCase();
-  return normalized === '미러야' || normalized === '밀어야' || normalized === 'himirror' || normalized === '하이미러';
+  return normalized === '미러야' || normalized === '밀어야' || normalized === '미로야' || normalized === '미라야' || 
+         normalized === '미러' || normalized === '미로' || normalized === '미라' || 
+         normalized === 'himirror' || normalized === '하이미러';
 };
 
 // 음성 인식 상태 관리
@@ -193,8 +195,38 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               return;
             }
             
-            // 더 엄격한 텍스트 품질 검사
-            if (cleanText.length > MIN_TEXT_LENGTH && 
+            // 핫워드 인식 우선 처리 (품질 검사 전에 먼저 확인)
+            log.verbose('핫워드 테스트:', cleanText, 'WAKEWORD_TEST.test:', WAKEWORD_TEST.test(cleanText));
+            if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(cleanText)) {
+              log.info('🎤 핫워드 인식됨:', cleanText);
+              log.info('🎯 명령 대기 모드로 전환 - 마이크 활성화');
+              
+              hotwordMode = 'command';
+              commandBuffer = '';
+              audioChunks = [];
+              
+              if (broadcast) {
+                broadcast({ type: 'status', status: 'listening_on' });
+                broadcast({ type: 'hotword_detected', text: cleanText });
+              }
+              
+              safeBeep();
+              lastTranscriptAt = now;
+              startListeningWindowTicker(broadcast);
+              
+              // 핫워드 인식 후 잠시 대기 (사용자가 명령을 준비할 시간)
+              setTimeout(() => {
+                if (broadcast) {
+                  broadcast({ type: 'status', status: 'ready_for_command' });
+                }
+              }, 500);
+              
+              lastRecognizedText = cleanText;
+              lastRecognitionTime = now;
+              consecutiveEmptyCount = 0;
+            }
+            // 일반 텍스트 품질 검사 (핫워드가 아닌 경우에만)
+            else if (cleanText.length > MIN_TEXT_LENGTH && 
                 !/^[에이]+$/.test(cleanText) && // "에", "이" 같은 단일 음소 제외
                 !/^[가-힣]{1,2}$/.test(cleanText) && // 1-2글자 한글 단어 제외
                 !/^[가-힣]{3,4}$/.test(cleanText) && // 3-4글자 한글 단어도 제외 (의미없는 단어들)
@@ -209,32 +241,6 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                 lastRecognitionTime = now;
                 lastTranscriptAt = now;
                 consecutiveEmptyCount = 0;
-                
-                // 호출어 모드에서 호출어 인식
-                if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(cleanText)) {
-                  log.info('🎤 핫워드 인식됨:', cleanText);
-                  log.info('🎯 명령 대기 모드로 전환 - 마이크 활성화');
-                  
-                  hotwordMode = 'command';
-                  commandBuffer = '';
-                  audioChunks = [];
-                  
-                  if (broadcast) {
-                    broadcast({ type: 'status', status: 'listening_on' });
-                    broadcast({ type: 'hotword_detected', text: cleanText });
-                  }
-                  
-                  safeBeep();
-                  lastTranscriptAt = now;
-                  startListeningWindowTicker(broadcast);
-                  
-                  // 핫워드 인식 후 잠시 대기 (사용자가 명령을 준비할 시간)
-                  setTimeout(() => {
-                    if (broadcast) {
-                      broadcast({ type: 'status', status: 'ready_for_command' });
-                    }
-                  }, 500);
-                }
 
                 // 명령 모드에서 사용자 명령 처리
                 if (hotwordMode === 'command') {
@@ -304,7 +310,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       }
     });
     
-  log.info('🎤 상시 듣기 시작 - 핫워드 대기 중: "미러야", "밀어야", "하이미러"');
+  log.info('🎤 상시 듣기 시작 - 핫워드 대기 중: "미러야", "밀어야", "미로야", "미라야", "미러", "미로", "미라", "하이미러"');
   
   // 상시 리스닝 시작 상태 브로드캐스트
   if (broadcast) {

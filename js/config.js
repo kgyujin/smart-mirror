@@ -29,9 +29,9 @@ const CAPTION_HIDE_AFTER_TTS_MS = Number(process.env.CAPTION_HIDE_AFTER_TTS_MS |
 const COMMAND_SILENCE_TIMEOUT_MS = 12000; // 호출어 후 말할 수 있는 무음 허용 시간
 const LISTENING_BROADCAST_INTERVAL_MS = 1000;
 
-// 웨이크워드 설정
-const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/i; // for .test
-const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
+// 웨이크워드 설정 (확장된 패턴)
+const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|미로야|미라야|미러|미로|미라|hi\s*mirror|하이\s*미러|하이미러)/i; // for .test
+const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|미로야|미라야|미러|미로|미라|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
 
 module.exports = {
   PORT,
