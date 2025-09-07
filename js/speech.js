@@ -40,7 +40,10 @@ const convertAudioToText = async (audioBuffer) => {
 
     if (response.data.result === 0 && response.data.return_object) {
       const recognizedText = response.data.return_object.recognized || '';
-      log.info('ETRI 음성인식 성공:', recognizedText);
+      // 핫워드 모드가 아닐 때만 로그 출력 (핫워드 인식 후 명령 대기 중일 때만)
+      if (hotwordMode !== 'hotword') {
+        log.info('ETRI 음성인식 성공:', recognizedText);
+      }
       return recognizedText;
     } else {
       log.error('ETRI 음성인식 실패:', response.data);
@@ -133,7 +136,7 @@ const startListeningWindowTicker = (broadcast) => {
     }
     if (remainingMs <= 0) {
       // 타임아웃: 명령 모드 종료
-      log.info('⏰ 명령 청취 타임아웃 - 호출어 대기 모드로 복귀');
+      log.info('명령 청취 타임아웃 - 호출어 대기 모드로 복귀');
       
       hotwordMode = 'hotword';
       commandBuffer = '';
@@ -198,8 +201,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
             // 핫워드 인식 우선 처리 (품질 검사 전에 먼저 확인)
             log.verbose('핫워드 테스트:', cleanText, 'WAKEWORD_TEST.test:', WAKEWORD_TEST.test(cleanText));
             if (hotwordMode === 'hotword' && WAKEWORD_TEST.test(cleanText)) {
-              log.info('🎤 핫워드 인식됨:', cleanText);
-              log.info('🎯 명령 대기 모드로 전환 - 마이크 활성화');
+              log.info('핫워드 인식됨:', cleanText);
+              log.info('명령 대기 모드로 전환 - 마이크 활성화');
               
               hotwordMode = 'command';
               commandBuffer = '';
@@ -252,8 +255,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
 
                   // 최종 문장 확정 시에만 처리
                   if (cleanCommand) {
-                    log.info('🎯 사용자 명령 인식됨:', cleanCommand);
-                    log.info('🔄 명령 처리 시작 - 마이크 비활성화');
+                    log.info('사용자 명령 인식됨:', cleanCommand);
+                    log.info('명령 처리 시작 - 마이크 비활성화');
                     
                     commandBuffer = '';
                     audioChunks = [];
@@ -267,12 +270,12 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                       // processRecognizedCommand 함수 호출
                       if (processRecognizedCommand) {
                         await processRecognizedCommand(cleanCommand);
-                        log.info('✅ 명령 처리 완료');
+                        log.info('명령 처리 완료');
                       } else {
                         log.warn('processRecognizedCommand 함수가 전달되지 않음');
                       }
                     } catch (error) {
-                      log.error('❌ 명령 처리 중 오류:', error);
+                      log.error('명령 처리 중 오류:', error);
                     }
                     
                     hotwordMode = 'hotword';
@@ -282,7 +285,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                       broadcast({ type: 'status', status: 'listening_off' });
                     }
                     
-                    log.info('🔇 호출어 대기 모드로 복귀 - 마이크 대기 상태');
+                    log.info('호출어 대기 모드로 복귀 - 마이크 대기 상태');
                   }
                 }
               } else {
@@ -310,7 +313,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
       }
     });
     
-  log.info('🎤 상시 듣기 시작 - 핫워드 대기 중: "미러야", "밀어야", "미로야", "미라야", "미러", "미로", "미라", "하이미러"');
+  log.info('상시 듣기 시작 - 핫워드 대기 중: "미러야", "밀어야", "미로야", "미라야", "미러", "미로", "미라", "하이미러"');
   
   // 상시 리스닝 시작 상태 브로드캐스트
   if (broadcast) {
@@ -334,7 +337,7 @@ const stopContinuousHotwordListener = (broadcast) => {
   if (broadcast) {
     broadcast({ type: 'status', status: 'listening_off' });
   }
-  log.info('🔇 상시 듣기 중지');
+  log.info('상시 듣기 중지');
 };
 
 module.exports = {
