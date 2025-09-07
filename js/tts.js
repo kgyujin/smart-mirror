@@ -71,8 +71,31 @@ const stopTTS = () => {
 };
 
 // 안전한 TTS 함수 (espeak 사용)
+// 텍스트를 더 자연스럽게 발음하도록 전처리
+const preprocessTextForNaturalSpeech = (text) => {
+  return text
+    // 숫자를 한글로 변환 (더 자연스러운 발음)
+    .replace(/(\d+)/g, (match) => {
+      const num = parseInt(match);
+      if (num < 10) {
+        const koreanNumbers = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+        return koreanNumbers[num];
+      }
+      return match; // 10 이상은 그대로
+    })
+    // 특수문자 제거 (자연스러운 발음 방해 요소)
+    .replace(/[()]/g, ' ')
+    .replace(/[\[\]]/g, ' ')
+    // 연속된 공백을 하나로
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 const safeTTS = async (text, broadcast) => {
   if (!text || text.trim() === '') return;
+  
+  // 텍스트 전처리로 더 자연스러운 발음
+  const processedText = preprocessTextForNaturalSpeech(text);
   
   // 이전 TTS가 진행 중이면 먼저 중단
   if (isTTSActive) {
@@ -82,21 +105,41 @@ const safeTTS = async (text, broadcast) => {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   
-  log.info('TTS 시작:', text);
+  log.info('TTS 시작:', processedText);
   isTTSActive = true;
   if (broadcast) {
-    broadcast({ type: 'tts', status: 'start', text });
+    broadcast({ type: 'tts', status: 'start', text: processedText });
   }
   
-  // espeak 사용
+  // Festival TTS 사용 (가장 자연스러운 음성)
   try {
-    // 더 자연스러운 한국어 TTS 설정 (속도, 피치, 진폭, 갭 최적화)
-    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -s 200 -v ko -p 60 -a 180 -g 8`;
+    // Festival TTS가 설치되어 있는지 확인
+    const { execSync } = require('child_process');
+    let useFestival = false;
+    
+    try {
+      execSync('which festival', { stdio: 'ignore' });
+      useFestival = true;
+    } catch (e) {
+      // Festival이 없으면 espeak 사용
+      useFestival = false;
+    }
+    
+    let command;
+    if (useFestival) {
+      // Festival TTS 사용 (더 자연스러운 음성)
+      log.info('Festival TTS 사용 (가장 자연스러운 음성)');
+      command = `echo "${processedText.replace(/"/g, '\\"')}" | festival --tts --language korean`;
+    } else {
+      // espeak 백업 사용 (개선된 설정)
+      log.info('espeak TTS 사용 (Festival이 설치되지 않음)');
+      command = `echo "${processedText.replace(/"/g, '\\"')}" | espeak -s 180 -v ko -p 50 -a 160 -g 5 -k 20 -m -b 1`;
+    }
     currentTTSProcess = exec(command, (error) => {
       if (error) {
         log.error('TTS 오류:', error.message);
       } else {
-        log.info('TTS 완료:', text);
+        log.info('TTS 완료:', processedText);
       }
       isTTSActive = false;
       if (broadcast) {
