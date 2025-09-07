@@ -372,7 +372,7 @@ const processRecognizedCommand = async (text, dependencies) => {
   const trimmed = (text || '').trim();
   if (!trimmed) return;
   
-  log.info('명령 처리:', trimmed);
+  log.info('🤖 스마트 대화 시스템 - 명령 처리 시작:', trimmed);
   
   const userId = 'default';
   let reply = '';
@@ -388,7 +388,7 @@ const processRecognizedCommand = async (text, dependencies) => {
     
     // 1단계: 스마트 질문 분류
     const questionClassification = await classifyUserQuestion(trimmed, contextSummary, openai);
-    log.info(`질문 분류: ${questionClassification.type} (신뢰도: ${(questionClassification.confidence * 100).toFixed(1)}%, 이유: ${questionClassification.reason})`);
+    log.info(`🧠 질문 분류: ${questionClassification.type} (신뢰도: ${(questionClassification.confidence * 100).toFixed(1)}%, 이유: ${questionClassification.reason})`);
     
     // 2단계: 문맥을 고려한 응답 생성
     switch (questionClassification.type) {
@@ -562,7 +562,9 @@ const processRecognizedCommand = async (text, dependencies) => {
       broadcast({ type: 'response', role: 'assistant', text: reply });
     }
     
+    log.info('🔊 TTS 응답 시작:', reply);
     await safeTTS(reply, broadcast);
+    log.info('✅ 대화 처리 완료');
     return reply;
     
   } catch (e) {

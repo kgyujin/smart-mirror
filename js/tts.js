@@ -19,7 +19,7 @@ let currentTTSProcessId = null;
 const stopTTS = () => {
   try {
     if (currentTTSProcess) {
-      log.tts('중단 요청');
+      log.info('🛑 TTS 중단 요청');
       
       if (process.platform === 'win32') {
         try { 
@@ -76,13 +76,13 @@ const safeTTS = async (text, broadcast) => {
   
   // 이전 TTS가 진행 중이면 먼저 중단
   if (isTTSActive) {
-    log.tts('이전 TTS 중단 후 새 TTS 시작');
+    log.info('🔄 이전 TTS 중단 후 새 TTS 시작');
     stopTTS();
     // 프로세스 완전 종료 대기
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   
-  log.tts('시작:', text);
+  log.info('🔊 TTS 시작:', text);
   isTTSActive = true;
   if (broadcast) {
     broadcast({ type: 'tts', status: 'start', text });
@@ -95,7 +95,7 @@ const safeTTS = async (text, broadcast) => {
       if (error) {
         log.error('TTS 오류:', error.message);
       } else {
-        log.tts('완료:', text);
+        log.info('🔊 TTS 완료:', text);
       }
       isTTSActive = false;
       if (broadcast) {
