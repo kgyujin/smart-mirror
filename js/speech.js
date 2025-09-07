@@ -242,12 +242,17 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                       broadcast({ type: 'status', status: 'processing' });
                     }
                     
-                    try {
-                      await processRecognizedCommand(cleanCommand);
-                      log.info('명령 처리 완료');
-                    } catch (error) {
-                      log.error('명령 처리 중 오류:', error);
-                    }
+                                         try {
+                       // processRecognizedCommand 함수 호출
+                       if (processRecognizedCommand) {
+                         await processRecognizedCommand(cleanCommand);
+                         log.info('명령 처리 완료');
+                       } else {
+                         log.warn('processRecognizedCommand 함수가 전달되지 않음');
+                       }
+                     } catch (error) {
+                       log.error('명령 처리 중 오류:', error);
+                     }
                     
                     hotwordMode = 'hotword';
                     lastTranscriptAt = now;

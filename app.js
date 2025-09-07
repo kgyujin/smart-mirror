@@ -22,10 +22,7 @@ const {
   fetchWeatherData, 
   environmentalAwareness,
   getKSTNow,
-  formatKSTTime,
-  formatKSTDate,
   parseRelativeDate,
-  isPureDateQuery,
   getKoreanDateInfo,
   fetchKSTNowFromAPI
 } = require('./js/weather');
@@ -47,8 +44,9 @@ const {
 const { PersonalizationSystem } = require('./js/personalization');
 const { 
   ConversationContext, 
-  PersonalizedRoutine, 
-  processRecognizedCommand 
+  processRecognizedCommand,
+  formatKSTTime,
+  formatKSTDate
 } = require('./js/conversation');
 const { 
   conversateWithAssistant, 
@@ -66,7 +64,6 @@ app.use(express.json());
 // 시스템 인스턴스 생성
 const personalizationSystem = new PersonalizationSystem(openai);
 const conversationContext = new ConversationContext();
-const personalizedRoutine = new PersonalizedRoutine();
 
 
 
@@ -169,27 +166,39 @@ app.get('/api/assistant', async (req, res) => {
             }
           }
 
-          try {
-            log.info('ETRI 기반 대화 시스템과 실제 대화 시작...');
-            const assistantResponse = await conversateWithAssistant(null, query);
-            
-            log.info('✅ ETRI 기반 대화 시스템 응답:', assistantResponse);
-            safeTTS(assistantResponse, broadcast);
-            
-            sendResponse({ 
-              response: assistantResponse,
-              success: true,
-              source: 'etri_assistant',
-              query: query
-            });
-            
-          } catch (assistantError) {
-            log.error('ETRI 기반 대화 시스템 오류:', assistantError);
-            sendResponse({ 
-              error: '대화 처리 실패: ' + assistantError.message,
-              query: query
-            });
-          }
+                  try {
+          log.info('스마트 문맥 인식 대화 시스템 시작...');
+          
+          // 새로운 스마트 대화 시스템 사용
+          const dependencies = {
+            conversationContext,
+            openai,
+            broadcast,
+            safeTTS,
+            parseRelativeDate,
+            formatKSTTime,
+            formatKSTDate,
+            processNewsQuery
+          };
+          
+          const assistantResponse = await processRecognizedCommand(query, dependencies);
+          
+          log.info('✅ 스마트 문맥 인식 대화 시스템 응답:', assistantResponse);
+          
+          sendResponse({
+            response: assistantResponse,
+            success: true,
+            source: 'smart_contextual_assistant',
+            query: query
+          });
+          
+        } catch (assistantError) {
+          log.error('스마트 문맥 인식 대화 시스템 오류:', assistantError);
+          sendResponse({
+            error: '대화 처리 실패: ' + assistantError.message,
+            query: query
+          });
+        }
 
         } else {
           sendResponse({ response: `"${transcription}" → 어시스턴트 트리거 조건이 아닙니다.` });
@@ -294,13 +303,10 @@ app.post('/api/chat', async (req, res) => {
     // 음성과 동일한 파이프라인 사용
     const dependencies = {
       conversationContext,
-      personalizedRoutine,
-      personalizationSystem,
       openai,
       broadcast,
       safeTTS,
       parseRelativeDate,
-      isPureDateQuery,
       formatKSTTime,
       formatKSTDate,
       processNewsQuery
@@ -323,13 +329,10 @@ app.post('/api/mic/toggle', (req, res) => {
     
     const dependencies = {
       conversationContext,
-      personalizedRoutine,
-      personalizationSystem,
       openai,
       broadcast,
       safeTTS,
       parseRelativeDate,
-      isPureDateQuery,
       formatKSTTime,
       formatKSTDate,
       processNewsQuery
@@ -425,7 +428,7 @@ const server = app.listen(PORT, () => {
   log.info(`서버 실행 중: http://localhost:${PORT}`);
   log.info('ETRI 음성인식 기반 스마트 미러 서비스 준비 완료');
   
-  log.info('✅ ETRI 음성인식 API 기반으로 설정되었습니다.');
+  log.info('✅ 스마트 문맥 인식 대화 시스템으로 설정되었습니다.');
 });
 
 // WebSocket 초기화
@@ -439,13 +442,10 @@ personalizationSystem.startMessageUpdates(broadcast, environmentalAwareness);
 if (ALWAYS_LISTEN) {
   const dependencies = {
     conversationContext,
-    personalizedRoutine,
-    personalizationSystem,
     openai,
     broadcast,
     safeTTS,
     parseRelativeDate,
-    isPureDateQuery,
     formatKSTTime,
     formatKSTDate,
     processNewsQuery
