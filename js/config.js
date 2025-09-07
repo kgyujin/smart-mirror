@@ -26,7 +26,7 @@ const CALENDAR_SOURCES_FILE = path.join(__dirname, '..', 'calendar_sources.json'
 const CAPTION_HIDE_AFTER_TTS_MS = Number(process.env.CAPTION_HIDE_AFTER_TTS_MS || 3000);
 
 // 명령 설정
-const COMMAND_SILENCE_TIMEOUT_MS = 12000; // 호출어 후 말할 수 있는 무음 허용 시간
+const COMMAND_SILENCE_TIMEOUT_MS = 5000; // 호출어 후 말할 수 있는 무음 허용 시간 (5초로 단축)
 const LISTENING_BROADCAST_INTERVAL_MS = 1000;
 
 // 웨이크워드 설정 (확장된 패턴)

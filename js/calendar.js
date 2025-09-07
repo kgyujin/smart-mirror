@@ -77,7 +77,7 @@ const fetchEventsFromICSInRange = async (urls, dayStart, dayEnd) => {
   };
   for (const url of urls) {
     try {
-      const data = await ical.async.fromURL(url, { timeout: 8000 });
+      const data = await ical.async.fromURL(url, { timeout: 3000 }); // 3초로 단축
       for (const key of Object.keys(data)) {
         const item = data[key];
         if (item.type !== 'VEVENT') continue;

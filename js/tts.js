@@ -78,8 +78,8 @@ const safeTTS = async (text, broadcast) => {
   if (isTTSActive) {
     log.info('이전 TTS 중단 후 새 TTS 시작');
     stopTTS();
-    // 프로세스 완전 종료 대기
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // 프로세스 완전 종료 대기 (단축)
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   
   log.info('TTS 시작:', text);
@@ -90,7 +90,8 @@ const safeTTS = async (text, broadcast) => {
   
   // espeak 사용
   try {
-    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -s 150 -v ko`;
+    // 더 자연스러운 한국어 TTS 설정 (속도, 피치, 진폭, 갭 최적화)
+    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -s 200 -v ko -p 60 -a 180 -g 8`;
     currentTTSProcess = exec(command, (error) => {
       if (error) {
         log.error('TTS 오류:', error.message);

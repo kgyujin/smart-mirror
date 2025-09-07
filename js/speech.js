@@ -35,7 +35,7 @@ const convertAudioToText = async (audioBuffer) => {
         'Content-Type': 'application/json; charset=UTF-8',
         'Authorization': ETRI_API_KEY
       },
-      timeout: 30000 // 30초 타임아웃
+      timeout: 10000 // 10초 타임아웃 (속도 개선)
     });
 
     if (response.data.result === 0 && response.data.return_object) {
@@ -217,12 +217,12 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               lastTranscriptAt = now;
               startListeningWindowTicker(broadcast);
               
-              // 핫워드 인식 후 잠시 대기 (사용자가 명령을 준비할 시간)
+              // 핫워드 인식 후 잠시 대기 (사용자가 명령을 준비할 시간) - 단축
               setTimeout(() => {
                 if (broadcast) {
                   broadcast({ type: 'status', status: 'ready_for_command' });
                 }
-              }, 500);
+              }, 200); // 500ms -> 200ms로 단축
               
               lastRecognizedText = cleanText;
               lastRecognitionTime = now;
