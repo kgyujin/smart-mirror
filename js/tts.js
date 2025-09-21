@@ -6,7 +6,7 @@ const { exec } = require('child_process');
 const { SPEECH_CREDENTIALS_PATH, CAPTION_HIDE_AFTER_TTS_MS } = require('./config');
 const { log } = require('./logging');
 
-// Google Cloud Text-to-Speech (무료 사용량: 월 100만 문자)
+// Google Cloud Text-to-Speech (무료 사용량: 월 400만 자 - WaveNet)
 let textToSpeech = null;
 let ttsClient = null;
 try {
@@ -44,13 +44,13 @@ const stopTTS = () => {
   }
 };
 
-// 텍스트 전처리 함수 - 자연스러운 읽기를 위한 텍스트 정리
+// 텍스트 전처리 함수 - 비용 절약을 위한 텍스트 최적화
 const preprocessText = (text) => {
   if (!text) return '';
   
   let processedText = text.trim();
   
-  // 특수 문자 처리
+  // 불필요한 문자 제거 (비용 절약)
   processedText = processedText
     .replace(/&/g, ' 그리고 ')  // & -> 그리고
     .replace(/\*/g, '')         // * 제거
@@ -82,7 +82,7 @@ const preprocessText = (text) => {
     .replace(/(\d+)ml/g, '$1밀리리터')     // 부피
     .replace(/(\d+)l/g, '$1리터');         // 리터
   
-  // 문장 부호 정리
+  // 문장 부호 정리 (비용 절약)
   processedText = processedText
     .replace(/\.{2,}/g, ' 잠깐만요 ')      // ... -> 잠깐만요
     .replace(/!{2,}/g, '!')               // !! -> !
@@ -90,7 +90,7 @@ const preprocessText = (text) => {
     .replace(/,,+/g, ',')                 // ,, -> ,
     .replace(/\.\.+/g, '.');              // .. -> .
   
-  // 공백 정리
+  // 공백 정리 (비용 절약)
   processedText = processedText
     .replace(/\s+/g, ' ')                 // 여러 공백을 하나로
     .replace(/\s*([,.!?;:])\s*/g, '$1 ')  // 문장부호 주변 공백 정리
@@ -99,11 +99,11 @@ const preprocessText = (text) => {
   return processedText;
 };
 
-// SSML 생성 함수 - 자연스러운 발음과 억양을 위한 SSML 태그 적용
+// 간소화된 SSML 생성 함수 - 비용 절약을 위한 최소한의 SSML
 const generateSSML = (text) => {
   if (!text) return '';
   
-  // 문장별로 분리하여 자연스러운 휴지 추가
+  // 긴 텍스트는 문장별로 분할하여 처리 (비용 최적화)
   const sentences = text.split(/([.!?])/).filter(s => s.trim());
   let ssmlText = '<speak>';
   
@@ -112,33 +112,61 @@ const generateSSML = (text) => {
     const punctuation = sentences[i + 1]?.trim();
     
     if (sentence) {
-      // 문장 시작에 약간의 휴지
+      // 문장 시작에 최소한의 휴지
       if (i > 0) {
-        ssmlText += '<break time="0.3s"/>';
+        ssmlText += '<break time="0.2s"/>';
       }
       
-      // 문장 내용
-      ssmlText += `<prosody rate="0.95" pitch="+2Hz">${sentence}</prosody>`;
+      // 간소화된 문장 내용 (비용 절약)
+      ssmlText += `<prosody rate="0.95">${sentence}</prosody>`;
       
-      // 문장 끝 처리
+      // 문장 끝 처리 (최소한의 휴지)
       if (punctuation === '.') {
-        ssmlText += '<break time="0.5s"/>';
-      } else if (punctuation === '!') {
-        ssmlText += '<prosody rate="0.9" pitch="+5Hz">!</prosody><break time="0.4s"/>';
-      } else if (punctuation === '?') {
-        ssmlText += '<prosody rate="0.9" pitch="+8Hz">?</prosody><break time="0.4s"/>';
-      } else if (punctuation === ',') {
-        ssmlText += '<break time="0.2s"/>';
-      } else if (punctuation === ';') {
         ssmlText += '<break time="0.3s"/>';
-      } else if (punctuation === ':') {
-        ssmlText += '<break time="0.25s"/>';
+      } else if (punctuation === '!') {
+        ssmlText += '<break time="0.3s"/>';
+      } else if (punctuation === '?') {
+        ssmlText += '<break time="0.3s"/>';
+      } else if (punctuation === ',') {
+        ssmlText += '<break time="0.1s"/>';
       }
     }
   }
   
   ssmlText += '</speak>';
   return ssmlText;
+};
+
+// 사용량 추적을 위한 간단한 로깅
+const logUsage = (text) => {
+  const charCount = text.length;
+  log.info(`TTS 사용량: ${charCount}자`);
+  
+  // 월별 사용량 추적 (간단한 파일 기반)
+  const usageFile = path.join(__dirname, '..', 'tts_usage.json');
+  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  
+  try {
+    let usage = {};
+    if (fs.existsSync(usageFile)) {
+      usage = JSON.parse(fs.readFileSync(usageFile, 'utf8'));
+    }
+    
+    if (!usage[currentMonth]) {
+      usage[currentMonth] = 0;
+    }
+    
+    usage[currentMonth] += charCount;
+    
+    // 무료 사용량 경고 (400만 자 기준)
+    if (usage[currentMonth] > 3500000) { // 350만 자에서 경고
+      log.warn(`⚠️ 월 사용량이 ${usage[currentMonth]}자에 도달했습니다. 무료 한도(400만 자)에 근접했습니다.`);
+    }
+    
+    fs.writeFileSync(usageFile, JSON.stringify(usage, null, 2));
+  } catch (e) {
+    log.error('사용량 추적 오류:', e.message);
+  }
 };
 
 // 안전한 TTS 함수
@@ -149,6 +177,9 @@ const safeTTS = async (text, broadcast) => {
   // 텍스트 전처리
   const processedText = preprocessText(text);
   log.tts('시작:', processedText);
+  
+  // 사용량 추적
+  logUsage(processedText);
   
   isTTSActive = true;
   if (broadcast) {
@@ -166,28 +197,28 @@ const safeTTS = async (text, broadcast) => {
   }
   
   try {
-    // SSML 생성
+    // 간소화된 SSML 생성 (비용 절약)
     const ssmlText = generateSSML(processedText);
     
     const request = {
       input: { ssml: ssmlText },
       voice: { 
         languageCode: 'ko-KR', 
-        name: process.env.TTS_VOICE || 'ko-KR-Wavenet-C', // 자연스러운 여성 음성
+        name: process.env.TTS_VOICE || 'ko-KR-Wavenet-A', // WaveNet A (가장 저렴)
         ssmlGender: 'FEMALE'
       },
       audioConfig: {
         audioEncoding: 'LINEAR16',
         speakingRate: Number(process.env.TTS_RATE || 0.95), // 약간 느리게
-        pitch: Number(process.env.TTS_PITCH || 2.0),        // 약간 높은 톤
-        volumeGainDb: Number(process.env.TTS_GAIN_DB || 1.0), // 약간 큰 소리
-        sampleRateHertz: Number(process.env.TTS_SAMPLE_RATE || 24000), // 고품질
-        effectsProfileId: ['headphone-class-device'] // 헤드폰 최적화
+        pitch: Number(process.env.TTS_PITCH || 0.0),        // 기본 톤 (비용 절약)
+        volumeGainDb: Number(process.env.TTS_GAIN_DB || 0.0), // 기본 볼륨 (비용 절약)
+        sampleRateHertz: Number(process.env.TTS_SAMPLE_RATE || 22050), // 표준 샘플레이트 (비용 절약)
+        // effectsProfileId 제거 (비용 절약)
       }
     };
     
     const [response] = await ttsClient.synthesizeSpeech(request);
-    const sampleRate = Number(process.env.TTS_SAMPLE_RATE || 24000);
+    const sampleRate = Number(process.env.TTS_SAMPLE_RATE || 22050);
     const wavPath = path.join(os.tmpdir(), `mirror_tts_${Date.now()}.wav`);
     
     // LINEAR16을 WAV 컨테이너로 래핑
