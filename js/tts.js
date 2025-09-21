@@ -89,9 +89,9 @@ const preprocessText = (text) => {
   return processedText;
 };
 
-// Piper TTS Python 스크립트 생성
-const createPiperScript = () => {
-  const scriptPath = path.join(__dirname, '..', 'piper_tts.py');
+// Kokoro TTS Python 스크립트 생성
+const createKokoroScript = () => {
+  const scriptPath = path.join(__dirname, '..', 'kokoro_tts.py');
   const scriptContent = `#!/usr/bin/env python3
 import sys
 import os
@@ -100,65 +100,67 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-# Piper TTS 설정
-PIPER_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'ko_KR-kss-medium.onnx')
-PIPER_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'models', 'ko_KR-kss-medium.onnx.json')
-
-def install_piper():
-    """Piper TTS 설치"""
+def install_kokoro():
+    """Kokoro TTS 설치"""
     try:
-        # pip install piper-tts-plus
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'piper-tts-plus'], 
+        # pip install kokoro-onnx soundfile
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'kokoro-onnx', 'soundfile'], 
                       check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"Piper 설치 실패: {e}", file=sys.stderr)
+        print(f"Kokoro TTS 설치 실패: {e}", file=sys.stderr)
         return False
 
-def download_korean_model():
-    """한국어 모델 다운로드"""
+def download_kokoro_model():
+    """Kokoro 모델 다운로드"""
     try:
         models_dir = os.path.join(os.path.dirname(__file__), 'models')
         os.makedirs(models_dir, exist_ok=True)
         
-        model_file = os.path.join(models_dir, 'ko_KR-kss-medium.onnx')
-        config_file = os.path.join(models_dir, 'ko_KR-kss-medium.onnx.json')
+        model_file = os.path.join(models_dir, 'kokoro-v1.0.int8.onnx')
+        voices_file = os.path.join(models_dir, 'voices-v1.0.bin')
         
         if not os.path.exists(model_file):
-            print("한국어 모델 다운로드 중...", file=sys.stderr)
+            print("Kokoro 모델 다운로드 중...", file=sys.stderr)
             # wget으로 모델 다운로드
-            model_url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ko/ko_KR/kss/ko_KR-kss-medium.onnx"
-            config_url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ko/ko_KR/kss/ko_KR-kss-medium.onnx.json"
+            model_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx"
+            voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
             
             subprocess.run(['wget', '-O', model_file, model_url], check=True)
-            subprocess.run(['wget', '-O', config_file, config_url], check=True)
-            print("한국어 모델 다운로드 완료", file=sys.stderr)
+            subprocess.run(['wget', '-O', voices_file, voices_url], check=True)
+            print("Kokoro 모델 다운로드 완료", file=sys.stderr)
         
-        return model_file, config_file
+        return model_file, voices_file
     except Exception as e:
         print(f"모델 다운로드 실패: {e}", file=sys.stderr)
         return None, None
 
 def synthesize_speech(text, output_file):
-    """Piper TTS로 음성 합성"""
+    """Kokoro TTS로 음성 합성"""
     try:
-        # Piper TTS 사용
-        from piper_tts_plus import PiperTTS
+        # Kokoro TTS 사용
+        from kokoro_onnx import Kokoro
         
         # 모델 로드
-        piper = PiperTTS(PIPER_MODEL_PATH, PIPER_CONFIG_PATH)
+        model_file, voices_file = download_kokoro_model()
+        if not model_file or not voices_file:
+            return False
+            
+        kokoro = Kokoro(model_file, voices_file)
         
-        # 음성 합성
-        audio_data = piper.synthesize(text)
+        # 음성 합성 (영어 음성 사용)
+        samples, sample_rate = kokoro.create(
+            text, voice="af_heart", speed=1.0, lang="en-us"
+        )
         
         # WAV 파일로 저장
-        with open(output_file, 'wb') as f:
-            f.write(audio_data)
+        import soundfile as sf
+        sf.write(output_file, samples, sample_rate)
         
         return True
     except ImportError:
-        # piper-tts-plus가 없으면 espeak 사용
-        print("Piper TTS를 사용할 수 없습니다. espeak로 폴백합니다.", file=sys.stderr)
+        # kokoro-onnx가 없으면 espeak 사용
+        print("Kokoro TTS를 사용할 수 없습니다. espeak으로 폴백합니다.", file=sys.stderr)
         return False
     except Exception as e:
         print(f"음성 합성 실패: {e}", file=sys.stderr)
@@ -166,7 +168,7 @@ def synthesize_speech(text, output_file):
 
 def main():
     if len(sys.argv) < 2:
-        print("사용법: python piper_tts.py <텍스트>", file=sys.stderr)
+        print("사용법: python kokoro_tts.py <텍스트>", file=sys.stderr)
         sys.exit(1)
     
     text = sys.argv[1]
@@ -176,7 +178,7 @@ def main():
         output_file = tmp_file.name
     
     try:
-        # Piper TTS 시도
+        # Kokoro TTS 시도
         if synthesize_speech(text, output_file):
             # 성공 시 파일 경로 출력
             print(output_file)
@@ -211,8 +213,8 @@ const safeTTS = async (text, broadcast) => {
   }
   
   try {
-    // Piper TTS Python 스크립트 생성
-    const scriptPath = createPiperScript();
+    // Kokoro TTS Python 스크립트 생성
+    const scriptPath = createKokoroScript();
     
     // Python 스크립트 실행
     const pythonProcess = spawn('python3', [scriptPath, processedText], {
@@ -232,7 +234,7 @@ const safeTTS = async (text, broadcast) => {
     
     pythonProcess.on('close', (code) => {
       if (code === 0 && outputData.trim()) {
-        // Piper TTS 성공
+        // Kokoro TTS 성공
         const wavPath = outputData.trim();
         
         if (fs.existsSync(wavPath)) {
@@ -262,8 +264,8 @@ const safeTTS = async (text, broadcast) => {
           fallbackToEspeak(processedText, broadcast);
         }
       } else {
-        // Piper TTS 실패, espeak 폴백
-        log.warn('Piper TTS 실패, espeak로 폴백:', errorData);
+        // Kokoro TTS 실패, espeak 폴백
+        log.warn('Kokoro TTS 실패, espeak로 폴백:', errorData);
         fallbackToEspeak(processedText, broadcast);
       }
     });
@@ -276,10 +278,11 @@ const safeTTS = async (text, broadcast) => {
   }
 };
 
-// espeak 폴백 함수
+// espeak 폴백 함수 (최적화된 설정)
 const fallbackToEspeak = (text, broadcast) => {
   try {
-    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -v ko -s 140 -p 50 -a 100`;
+    // 최적화된 espeak 설정 - 자연스러운 한국어 음성
+    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -v ko -s 100 -p 30 -a 70 -g 15 -k 0`;
     currentTTSProcess = exec(command, (error) => {
       if (error) {
         log.error('TTS 오류:', error.message);
