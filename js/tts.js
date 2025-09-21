@@ -1,8 +1,20 @@
 const fs = require('fs');
 const path = require('path');
-const { exec, spawn } = require('child_process');
-const { CAPTION_HIDE_AFTER_TTS_MS } = require('./config');
+const wav = require('wav');
+const os = require('os');
+const { exec } = require('child_process');
+const { SPEECH_CREDENTIALS_PATH, CAPTION_HIDE_AFTER_TTS_MS } = require('./config');
 const { log } = require('./logging');
+
+// Google Cloud Text-to-Speech (무료 사용량: 월 100만 문자)
+let textToSpeech = null;
+let ttsClient = null;
+try {
+  textToSpeech = require('@google-cloud/text-to-speech');
+  ttsClient = new textToSpeech.TextToSpeechClient({ keyFilename: SPEECH_CREDENTIALS_PATH });
+} catch (e) {
+  log.error('Google Cloud TTS 초기화 실패:', e.message);
+}
 
 // 현재 TTS 진행 여부 (TTS 중에는 호출어를 무시)
 let isTTSActive = false;
@@ -28,7 +40,7 @@ const stopTTS = () => {
     log.error('TTS 중단 오류:', e);
   } finally {
     currentTTSProcess = null;
-    isTTSActive = false; // 강제 중단 시에도 상태 초기화
+    isTTSActive = false;
   }
 };
 
@@ -51,8 +63,6 @@ const preprocessText = (text) => {
     .replace(/€/g, ' 유로 ')    // € -> 유로
     .replace(/£/g, ' 파운드 ')  // £ -> 파운드
     .replace(/¥/g, ' 엔 ')      // ¥ -> 엔
-    .replace(/°C/g, '도씨')     // °C -> 도씨
-    .replace(/°F/g, '도화씨')   // °F -> 도화씨
     .replace(/°C/g, '도씨')     // °C -> 도씨
     .replace(/°F/g, '도화씨');  // °F -> 도화씨
   
@@ -89,113 +99,46 @@ const preprocessText = (text) => {
   return processedText;
 };
 
-// Kokoro TTS Python 스크립트 생성
-const createKokoroScript = () => {
-  const scriptPath = path.join(__dirname, '..', 'kokoro_tts.py');
-  const scriptContent = `#!/usr/bin/env python3
-import sys
-import os
-import json
-import subprocess
-import tempfile
-from pathlib import Path
-
-def install_kokoro():
-    """Kokoro TTS 설치"""
-    try:
-        # pip install kokoro-onnx soundfile
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'kokoro-onnx', 'soundfile'], 
-                      check=True, capture_output=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Kokoro TTS 설치 실패: {e}", file=sys.stderr)
-        return False
-
-def download_kokoro_model():
-    """Kokoro 모델 다운로드"""
-    try:
-        models_dir = os.path.join(os.path.dirname(__file__), 'models')
-        os.makedirs(models_dir, exist_ok=True)
-        
-        model_file = os.path.join(models_dir, 'kokoro-v1.0.int8.onnx')
-        voices_file = os.path.join(models_dir, 'voices-v1.0.bin')
-        
-        if not os.path.exists(model_file):
-            print("Kokoro 모델 다운로드 중...", file=sys.stderr)
-            # wget으로 모델 다운로드
-            model_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx"
-            voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
-            
-            subprocess.run(['wget', '-O', model_file, model_url], check=True)
-            subprocess.run(['wget', '-O', voices_file, voices_url], check=True)
-            print("Kokoro 모델 다운로드 완료", file=sys.stderr)
-        
-        return model_file, voices_file
-    except Exception as e:
-        print(f"모델 다운로드 실패: {e}", file=sys.stderr)
-        return None, None
-
-def synthesize_speech(text, output_file):
-    """Kokoro TTS로 음성 합성"""
-    try:
-        # Kokoro TTS 사용
-        from kokoro_onnx import Kokoro
-        
-        # 모델 로드
-        model_file, voices_file = download_kokoro_model()
-        if not model_file or not voices_file:
-            return False
-            
-        kokoro = Kokoro(model_file, voices_file)
-        
-        # 음성 합성 (영어 음성 사용)
-        samples, sample_rate = kokoro.create(
-            text, voice="af_heart", speed=1.0, lang="en-us"
-        )
-        
-        # WAV 파일로 저장
-        import soundfile as sf
-        sf.write(output_file, samples, sample_rate)
-        
-        return True
-    except ImportError:
-        # kokoro-onnx가 없으면 espeak 사용
-        print("Kokoro TTS를 사용할 수 없습니다. espeak으로 폴백합니다.", file=sys.stderr)
-        return False
-    except Exception as e:
-        print(f"음성 합성 실패: {e}", file=sys.stderr)
-        return False
-
-def main():
-    if len(sys.argv) < 2:
-        print("사용법: python kokoro_tts.py <텍스트>", file=sys.stderr)
-        sys.exit(1)
-    
-    text = sys.argv[1]
-    
-    # 임시 파일 생성
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-        output_file = tmp_file.name
-    
-    try:
-        # Kokoro TTS 시도
-        if synthesize_speech(text, output_file):
-            # 성공 시 파일 경로 출력
-            print(output_file)
-        else:
-            # 실패 시 espeak 사용
-            print("espeak_fallback", file=sys.stderr)
-            sys.exit(1)
-    except Exception as e:
-        print(f"오류: {e}", file=sys.stderr)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-`;
+// SSML 생성 함수 - 자연스러운 발음과 억양을 위한 SSML 태그 적용
+const generateSSML = (text) => {
+  if (!text) return '';
   
-  fs.writeFileSync(scriptPath, scriptContent);
-  return scriptPath;
+  // 문장별로 분리하여 자연스러운 휴지 추가
+  const sentences = text.split(/([.!?])/).filter(s => s.trim());
+  let ssmlText = '<speak>';
+  
+  for (let i = 0; i < sentences.length; i += 2) {
+    const sentence = sentences[i]?.trim();
+    const punctuation = sentences[i + 1]?.trim();
+    
+    if (sentence) {
+      // 문장 시작에 약간의 휴지
+      if (i > 0) {
+        ssmlText += '<break time="0.3s"/>';
+      }
+      
+      // 문장 내용
+      ssmlText += `<prosody rate="0.95" pitch="+2Hz">${sentence}</prosody>`;
+      
+      // 문장 끝 처리
+      if (punctuation === '.') {
+        ssmlText += '<break time="0.5s"/>';
+      } else if (punctuation === '!') {
+        ssmlText += '<prosody rate="0.9" pitch="+5Hz">!</prosody><break time="0.4s"/>';
+      } else if (punctuation === '?') {
+        ssmlText += '<prosody rate="0.9" pitch="+8Hz">?</prosody><break time="0.4s"/>';
+      } else if (punctuation === ',') {
+        ssmlText += '<break time="0.2s"/>';
+      } else if (punctuation === ';') {
+        ssmlText += '<break time="0.3s"/>';
+      } else if (punctuation === ':') {
+        ssmlText += '<break time="0.25s"/>';
+      }
+    }
+  }
+  
+  ssmlText += '</speak>';
+  return ssmlText;
 };
 
 // 안전한 TTS 함수
@@ -212,97 +155,83 @@ const safeTTS = async (text, broadcast) => {
     broadcast({ type: 'tts', status: 'start', text: processedText });
   }
   
-  try {
-    // Kokoro TTS Python 스크립트 생성
-    const scriptPath = createKokoroScript();
-    
-    // Python 스크립트 실행
-    const pythonProcess = spawn('python3', [scriptPath, processedText], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-    
-    let outputData = '';
-    let errorData = '';
-    
-    pythonProcess.stdout.on('data', (data) => {
-      outputData += data.toString();
-    });
-    
-    pythonProcess.stderr.on('data', (data) => {
-      errorData += data.toString();
-    });
-    
-    pythonProcess.on('close', (code) => {
-      if (code === 0 && outputData.trim()) {
-        // Kokoro TTS 성공
-        const wavPath = outputData.trim();
-        
-        if (fs.existsSync(wavPath)) {
-          // 플랫폼별 재생 방법 선택
-          let playCmd = '';
-          if (process.platform === 'win32') {
-            const psPath = wavPath.replace(/\\/g, '/');
-            playCmd = `powershell -NoProfile -Command $p=New-Object System.Media.SoundPlayer; $p.SoundLocation='${psPath}'; $p.Load(); $p.PlaySync()`;
-          } else {
-            playCmd = `aplay -q "${wavPath}"`;
-          }
-          
-          currentTTSProcess = exec(playCmd, (error) => {
-            try { fs.unlinkSync(wavPath); } catch {}
-            isTTSActive = false;
-            if (broadcast) {
-              broadcast({ type: 'tts', status: 'end', text: processedText, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
-            }
-          });
-          
-          if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
-            currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
-            currentTTSProcess.on('close', () => { currentTTSProcess = null; });
-          }
-        } else {
-          // WAV 파일이 없으면 espeak 폴백
-          fallbackToEspeak(processedText, broadcast);
-        }
-      } else {
-        // Kokoro TTS 실패, espeak 폴백
-        log.warn('Kokoro TTS 실패, espeak로 폴백:', errorData);
-        fallbackToEspeak(processedText, broadcast);
-      }
-    });
-    
-    currentTTSProcess = pythonProcess;
-    
-  } catch (error) {
-    log.error('TTS 실행 오류:', error);
-    fallbackToEspeak(processedText, broadcast);
+  // Google Cloud TTS 사용
+  if (!ttsClient) {
+    log.error('Google Cloud TTS 클라이언트가 초기화되지 않았습니다.');
+    isTTSActive = false;
+    if (broadcast) {
+      broadcast({ type: 'tts', status: 'end', text: processedText, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+    }
+    return;
   }
-};
-
-// espeak 폴백 함수 (최적화된 설정)
-const fallbackToEspeak = (text, broadcast) => {
+  
   try {
-    // 최적화된 espeak 설정 - 자연스러운 한국어 음성
-    const command = `echo "${text.replace(/"/g, '\\"')}" | espeak -v ko -s 100 -p 30 -a 70 -g 15 -k 0`;
-    currentTTSProcess = exec(command, (error) => {
-      if (error) {
-        log.error('TTS 오류:', error.message);
-      } else {
-        log.tts('완료:', text);
+    // SSML 생성
+    const ssmlText = generateSSML(processedText);
+    
+    const request = {
+      input: { ssml: ssmlText },
+      voice: { 
+        languageCode: 'ko-KR', 
+        name: process.env.TTS_VOICE || 'ko-KR-Wavenet-C', // 자연스러운 여성 음성
+        ssmlGender: 'FEMALE'
+      },
+      audioConfig: {
+        audioEncoding: 'LINEAR16',
+        speakingRate: Number(process.env.TTS_RATE || 0.95), // 약간 느리게
+        pitch: Number(process.env.TTS_PITCH || 2.0),        // 약간 높은 톤
+        volumeGainDb: Number(process.env.TTS_GAIN_DB || 1.0), // 약간 큰 소리
+        sampleRateHertz: Number(process.env.TTS_SAMPLE_RATE || 24000), // 고품질
+        effectsProfileId: ['headphone-class-device'] // 헤드폰 최적화
       }
+    };
+    
+    const [response] = await ttsClient.synthesizeSpeech(request);
+    const sampleRate = Number(process.env.TTS_SAMPLE_RATE || 24000);
+    const wavPath = path.join(os.tmpdir(), `mirror_tts_${Date.now()}.wav`);
+    
+    // LINEAR16을 WAV 컨테이너로 래핑
+    try {
+      const writer = new wav.FileWriter(wavPath, { channels: 1, sampleRate, bitDepth: 16 });
+      writer.write(Buffer.from(response.audioContent));
+      writer.end();
+    } catch (wrapErr) {
+      log.warn('WAV 래핑 실패, RAW로 재생 시도:', wrapErr.message);
+      fs.writeFileSync(wavPath, Buffer.from(response.audioContent));
+    }
+    
+    // 플랫폼별 재생 방법 선택
+    let playCmd = '';
+    if (process.platform === 'win32') {
+      // Windows: PowerShell SoundPlayer 사용
+      const psPath = wavPath.replace(/\\/g, '/');
+      playCmd = `powershell -NoProfile -Command $p=New-Object System.Media.SoundPlayer; $p.SoundLocation='${psPath}'; $p.Load(); $p.PlaySync()`;
+    } else {
+      // Linux: aplay 사용
+      playCmd = `aplay -q "${wavPath}"`;
+    }
+    
+    currentTTSProcess = exec(playCmd, (error) => {
+      if (error) {
+        log.error('음성 재생 실패:', error.message);
+      }
+      try { fs.unlinkSync(wavPath); } catch {}
       isTTSActive = false;
       if (broadcast) {
-        broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+        broadcast({ type: 'tts', status: 'end', text: processedText, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
       }
     });
+    
     if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
       currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
       currentTTSProcess.on('close', () => { currentTTSProcess = null; });
     }
-  } catch (error) {
-    log.error('espeak 실행 오류:', error);
+    
+  } catch (e) {
+    log.error('Google Cloud TTS 오류:', e.message);
     isTTSActive = false;
     if (broadcast) {
-      broadcast({ type: 'tts', status: 'end', text, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
+      broadcast({ type: 'tts', status: 'end', text: processedText, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
     }
   }
 };
@@ -311,5 +240,5 @@ module.exports = {
   safeTTS,
   stopTTS,
   isTTSActive: getTTSActive,
-  ttsClient: null // Google Cloud TTS 제거
+  ttsClient
 };
