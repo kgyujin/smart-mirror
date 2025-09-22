@@ -357,7 +357,7 @@ const classifyWithoutGPT = (userText, context) => {
 
 // ========== 메인 대화 처리 함수 ==========
 
-const processRecognizedCommand = async (text, dependencies) => {
+const processRecognizedCommand = async (text, dependencies, emotionData = null) => {
   const {
     conversationContext,
     openai,
@@ -385,6 +385,24 @@ const processRecognizedCommand = async (text, dependencies) => {
     // 감정 및 의도 분석
     const emotion = analyzeEmotion(trimmed);
     const intent = analyzeUserIntent(trimmed, contextSummary);
+    
+    // 감정 분석 데이터가 있으면 우선 처리
+    if (emotionData && emotionData.success && emotionData.confidence > 0.5) {
+      log.info(`🎯 감정 기반 응답 우선 처리: ${emotionData.emotion} (${(emotionData.confidence * 100).toFixed(1)}%)`);
+      
+      // 감정 기반 응답을 TTS로 출력
+      if (broadcast) {
+        broadcast({ 
+          type: 'emotion_response', 
+          emotion: emotionData.emotion,
+          confidence: emotionData.confidence,
+          response: emotionData.response 
+        });
+      }
+      
+      await safeTTS(emotionData.response, broadcast);
+      return emotionData.response;
+    }
     
     // 1단계: 스마트 질문 분류
     const questionClassification = await classifyUserQuestion(trimmed, contextSummary, openai);

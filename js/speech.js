@@ -13,6 +13,7 @@ const {
   MAX_CONSECUTIVE_EMPTY
 } = require('./config');
 const { log } = require('./logging');
+const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 
 let currentAudioBuffer = null;
 
@@ -76,6 +77,38 @@ const convertAudioToText = async (audioBuffer) => {
       log.error('ETRI 음성인식 API 오류:', error.message);
       return null;
     }
+  }
+};
+
+// 음성 데이터를 텍스트와 감정으로 동시 분석하는 함수
+const analyzeAudioComprehensive = async (audioBuffer, broadcast) => {
+  try {
+    // 병렬로 음성인식과 감정분석 수행
+    const [transcription, emotionResult] = await Promise.allSettled([
+      convertAudioToText(audioBuffer),
+      analyzeEmotion(audioBuffer)
+    ]);
+
+    const result = {
+      text: transcription.status === 'fulfilled' ? transcription.value : null,
+      emotion: emotionResult.status === 'fulfilled' ? emotionResult.value : null,
+      success: true
+    };
+
+    // 감정 분석 결과가 있으면 처리
+    if (result.emotion && result.emotion.success) {
+      await processEmotionResponse(result.emotion, broadcast);
+    }
+
+    return result;
+  } catch (error) {
+    log.error('종합 음성 분석 오류:', error);
+    return {
+      text: null,
+      emotion: null,
+      success: false,
+      error: error.message
+    };
   }
 };
 
@@ -184,7 +217,9 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
         isProcessingAudio = true;
         
         try {
-          const transcription = await convertAudioToText(audioBuffer);
+          // 종합 음성 분석 (텍스트 + 감정)
+          const analysisResult = await analyzeAudioComprehensive(audioBuffer, broadcast);
+          const transcription = analysisResult.text;
           
           if (transcription && transcription.trim()) {
             // 의미있는 텍스트인지 확인 (더 엄격한 필터링)
@@ -343,6 +378,7 @@ const stopContinuousHotwordListener = (broadcast) => {
 module.exports = {
   safeBeep,
   convertAudioToText,
+  analyzeAudioComprehensive,
   isWakewordOnly,
   startContinuousHotwordListener,
   stopContinuousHotwordListener,

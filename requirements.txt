@@ -1,0 +1,12 @@
+# 고성능 음성 감정 분석 서버 의존성
+torch>=2.0.0
+torchaudio>=2.0.0
+transformers>=4.30.0
+flask>=2.3.0
+flask-cors>=4.0.0
+librosa>=0.10.0
+numpy>=1.24.0
+scipy>=1.10.0
+soundfile>=0.12.0
+accelerate>=0.20.0
+datasets>=2.12.0
