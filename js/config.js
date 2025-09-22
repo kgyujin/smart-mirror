@@ -34,7 +34,12 @@ const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|미로야|미라야|미러
 const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|미로야|미라야|미러|미로|미라|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
 
 // 감정 분석 서버 설정
-const EMOTION_SERVER_URL = process.env.EMOTION_SERVER_URL || 'http://192.168.1.100:5001';
+const EMOTION_SERVER_URL = process.env.EMOTION_SERVER_URL || 'http://192.168.1.100:5050';
+
+// 감정 분석 오디오 포맷/파라미터
+const EMOTION_AUDIO_FORMAT = process.env.EMOTION_AUDIO_FORMAT || 'wav'; // wav 고정 전송
+const EMOTION_SAMPLE_RATE = Number(process.env.EMOTION_SAMPLE_RATE || 16000); // 16 kHz
+const EMOTION_NUM_CHANNELS = Number(process.env.EMOTION_NUM_CHANNELS || 1); // mono
 
 module.exports = {
   PORT,
@@ -54,5 +59,8 @@ module.exports = {
   LISTENING_BROADCAST_INTERVAL_MS,
   WAKEWORD_TEST,
   WAKEWORD_REMOVE,
-  EMOTION_SERVER_URL
+  EMOTION_SERVER_URL,
+  EMOTION_AUDIO_FORMAT,
+  EMOTION_SAMPLE_RATE,
+  EMOTION_NUM_CHANNELS
 };

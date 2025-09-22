@@ -379,17 +379,17 @@ def analyze_emotion_file():
 
 if __name__ == '__main__':
     # 서버 시작
-    logger.info("🚀 고성능 감정 분석 서버 시작")
-    logger.info(f"📱 디바이스: {emotion_analyzer.device}")
-    logger.info("🌐 서버 주소: http://0.0.0.0:5001")
-    logger.info("📊 API 엔드포인트:")
+    logger.info("감정 분석 서버 시작")
+    logger.info(f"디바이스: {emotion_analyzer.device}")
+    logger.info("서버 주소: http://0.0.0.0:5050")
+    logger.info("API 엔드포인트:")
     logger.info("  - POST /analyze_emotion (Base64 오디오)")
     logger.info("  - POST /analyze_emotion_file (파일 업로드)")
     logger.info("  - GET /health (상태 확인)")
     
     app.run(
         host='0.0.0.0',
-        port=5001,
+        port=5050,
         debug=False,
         threaded=True
     )

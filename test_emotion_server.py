@@ -10,7 +10,7 @@ import time
 import os
 
 # 서버 설정
-SERVER_URL = "http://localhost:5001"
+SERVER_URL = "http://localhost:5050"
 
 def test_health_check():
     """서버 상태 확인 테스트"""
@@ -150,7 +150,7 @@ def main():
     print("\n" + "=" * 50)
     print("✅ 테스트 완료!")
     print("\n📝 라즈베리파이에서 사용할 주소:")
-    print(f"http://{get_local_ip()}:5001")
+    print(f"http://{get_local_ip()}:5050")
 
 def get_local_ip():
     """로컬 IP 주소 가져오기"""
