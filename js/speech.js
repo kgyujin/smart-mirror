@@ -80,37 +80,8 @@ const convertAudioToText = async (audioBuffer) => {
   }
 };
 
-// 음성 데이터를 텍스트와 감정으로 동시 분석하는 함수
-const analyzeAudioComprehensive = async (audioBuffer, broadcast) => {
-  try {
-    // 병렬로 음성인식과 감정분석 수행
-    const [transcription, emotionResult] = await Promise.allSettled([
-      convertAudioToText(audioBuffer),
-      analyzeEmotion(audioBuffer)
-    ]);
-
-    const result = {
-      text: transcription.status === 'fulfilled' ? transcription.value : null,
-      emotion: emotionResult.status === 'fulfilled' ? emotionResult.value : null,
-      success: true
-    };
-
-    // 감정 분석 결과가 있으면 처리
-    if (result.emotion && result.emotion.success) {
-      await processEmotionResponse(result.emotion, broadcast);
-    }
-
-    return result;
-  } catch (error) {
-    log.error('종합 음성 분석 오류:', error);
-    return {
-      text: null,
-      emotion: null,
-      success: false,
-      error: error.message
-    };
-  }
-};
+// 이 함수는 더 이상 사용하지 않음 (실시간 감정 분석 제거)
+// const analyzeAudioComprehensive = async (audioBuffer, broadcast) => { ... }
 
 // Short beep on wake
 const safeBeep = () => {
@@ -148,6 +119,10 @@ let consecutiveEmptyCount = 0; // 연속 빈 결과 카운트
 let lastRecognitionTime = 0; // 마지막 인식 시간
 let recognitionCooldown = 1000; // 인식 간 최소 대기 시간 (1초)
 
+// 감정 분석용 전체 음성 버퍼 관리
+let emotionAudioBuffer = []; // 호출어부터 명령 완료까지의 전체 음성
+let isCollectingEmotionAudio = false; // 감정 분석용 음성 수집 중인지
+
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
     clearInterval(listeningWindowInterval);
@@ -171,6 +146,10 @@ const startListeningWindowTicker = (broadcast) => {
       // 타임아웃: 명령 모드 종료
       log.info('명령 청취 타임아웃 - 호출어 대기 모드로 복귀');
       
+      // 감정 분석용 음성 수집 종료
+      isCollectingEmotionAudio = false;
+      emotionAudioBuffer = [];
+      
       hotwordMode = 'hotword';
       commandBuffer = '';
       audioChunks = [];
@@ -184,7 +163,7 @@ const startListeningWindowTicker = (broadcast) => {
   }, LISTENING_BROADCAST_INTERVAL_MS);
 };
 
-const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => {
+const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dependencies = null) => {
   if (isMicListening) return;
   isMicListening = true;
   hotwordMode = 'hotword';
@@ -217,9 +196,14 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
         isProcessingAudio = true;
         
         try {
-          // 종합 음성 분석 (텍스트 + 감정)
-          const analysisResult = await analyzeAudioComprehensive(audioBuffer, broadcast);
-          const transcription = analysisResult.text;
+          // 감정 분석용 음성 수집 (명령 모드일 때만)
+          if (isCollectingEmotionAudio) {
+            emotionAudioBuffer.push(audioBuffer);
+            log.verbose('🎤 감정 분석용 음성 청크 수집:', audioBuffer.length, 'bytes');
+          }
+          
+          // 음성인식만 수행 (감정 분석은 명령 완료 시점에)
+          const transcription = await convertAudioToText(audioBuffer);
           
           if (transcription && transcription.trim()) {
             // 의미있는 텍스트인지 확인 (더 엄격한 필터링)
@@ -242,6 +226,11 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
               hotwordMode = 'command';
               commandBuffer = '';
               audioChunks = [];
+              
+              // 감정 분석용 음성 수집 시작
+              emotionAudioBuffer = []; // 이전 버퍼 초기화
+              isCollectingEmotionAudio = true;
+              log.info('🎤 감정 분석용 음성 수집 시작');
               
               if (broadcast) {
                 broadcast({ type: 'status', status: 'listening_on' });
@@ -302,9 +291,24 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                     }
                     
                     try {
-                      // processRecognizedCommand 함수 호출
+                      // 전체 음성으로 감정 분석 수행
+                      let emotionResult = null;
+                      if (isCollectingEmotionAudio && emotionAudioBuffer.length > 0) {
+                        log.info('🎯 전체 음성으로 감정 분석 시작');
+                        const fullAudioBuffer = Buffer.concat(emotionAudioBuffer);
+                        log.info(`📊 수집된 음성 데이터: ${fullAudioBuffer.length} bytes (${emotionAudioBuffer.length} 청크)`);
+                        
+                        emotionResult = await analyzeEmotion(fullAudioBuffer);
+                        if (emotionResult && emotionResult.success) {
+                          log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+                        } else {
+                          log.warn('감정 분석 실패 또는 신뢰도 부족');
+                        }
+                      }
+                      
+                      // processRecognizedCommand 함수 호출 (감정 데이터 포함)
                       if (processRecognizedCommand) {
-                        await processRecognizedCommand(cleanCommand);
+                        await processRecognizedCommand(cleanCommand, dependencies, emotionResult);
                         log.info('명령 처리 완료');
                       } else {
                         log.warn('processRecognizedCommand 함수가 전달되지 않음');
@@ -312,6 +316,10 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast) => 
                     } catch (error) {
                       log.error('명령 처리 중 오류:', error);
                     }
+                    
+                    // 감정 분석용 음성 수집 종료
+                    isCollectingEmotionAudio = false;
+                    emotionAudioBuffer = [];
                     
                     hotwordMode = 'hotword';
                     lastTranscriptAt = now;
