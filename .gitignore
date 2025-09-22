@@ -7,6 +7,8 @@ __pycache__/
 env/
 venv/
 ENV/
+emotion_env/
+emotion_env_backup/
 build/
 develop-eggs/
 dist/
@@ -22,6 +24,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Python 가상환경 및 패키지 관리
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Node.js 관련 파일
 node_modules/
@@ -56,6 +63,12 @@ tokens.json
 # 오디오 파일
 *.wav
 *.raw
+test_audio.wav
+
+# 감정 분석 서버 로그 및 임시 파일
+emotion_server.log
+tts_usage.json
+*.tmp
 
 # 운영체제 관련 파일
 .DS_Store
