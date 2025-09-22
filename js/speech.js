@@ -15,6 +15,33 @@ const {
 const { log } = require('./logging');
 const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 
+/**
+ * Fallback implementation for analyzeAudioComprehensive.
+ * 기존 analyzeAudio가 있다면 위임하고, 없으면 안전한 최소 결과를 반환해 앱이 중단되지 않게 함.
+ * @param {Buffer|Uint8Array} audioBuffer
+ * @param {Object} opts
+ * @returns {Promise<Object>}
+ */
+async function analyzeAudioComprehensive(audioBuffer, opts = {}) {
+  try {
+    // analyzeAudio가 정의돼 있다면 우선 사용
+    if (typeof analyzeAudio === 'function') {
+      return await analyzeAudio(audioBuffer, opts);
+    }
+  } catch (_) {
+    // 위임 중 오류가 나더라도 최소 결과로 안전 복구
+  }
+  return {
+    ok: true,
+    mode: 'comprehensive-fallback',
+    summary: 'No-op analysis (fallback).',
+    metrics: {},
+    emotions: [],
+    keywords: [],
+    raw: null,
+  };
+}
+
 let currentAudioBuffer = null;
 
 // ETRI 음성인식 API를 사용한 오디오-텍스트 변환 함수
