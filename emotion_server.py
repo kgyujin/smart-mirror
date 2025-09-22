@@ -84,29 +84,71 @@ class EmotionAnalyzer:
             raise
     
     def preprocess_audio(self, audio_data: bytes) -> torch.Tensor:
-        """오디오 데이터 전처리"""
+        """오디오 데이터 전처리 (안전한 버전)"""
         try:
+            # 빈 데이터 체크
+            if not audio_data or len(audio_data) == 0:
+                logger.warn("빈 오디오 데이터")
+                raise ValueError("Empty audio data")
+            
             # 바이트 데이터를 오디오로 변환
             audio_io = io.BytesIO(audio_data)
-            waveform, sample_rate = torchaudio.load(audio_io)
             
-            # 모노로 변환
-            if waveform.shape[0] > 1:
-                waveform = torch.mean(waveform, dim=0, keepdim=True)
-            
-            # 16kHz로 리샘플링
-            if sample_rate != 16000:
-                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
-                waveform = resampler(waveform)
-            
-            # 정규화
-            waveform = waveform / torch.max(torch.abs(waveform))
-            
-            return waveform.squeeze(0)  # (samples,)
+            # soundfile을 사용한 안전한 로딩
+            try:
+                waveform, sample_rate = sf.read(audio_io)
+                waveform = torch.from_numpy(waveform).float()
+                
+                # 스테레오를 모노로 변환
+                if waveform.dim() > 1:
+                    waveform = torch.mean(waveform, dim=-1)
+                
+                # 16kHz로 리샘플링 (필요시)
+                if sample_rate != 16000:
+                    from scipy.signal import resample
+                    num_samples = int(len(waveform) * 16000 / sample_rate)
+                    waveform = torch.from_numpy(resample(waveform.numpy(), num_samples)).float()
+                
+                # 최소 길이 확인 (0.1초 이상)
+                min_length = int(16000 * 0.1)  # 0.1초
+                if len(waveform) < min_length:
+                    logger.warn(f"오디오가 너무 짧음: {len(waveform)} samples")
+                    # 짧은 오디오는 패딩
+                    padding = min_length - len(waveform)
+                    waveform = torch.cat([waveform, torch.zeros(padding)])
+                
+                # 정규화 (0으로 나누기 방지)
+                max_val = torch.max(torch.abs(waveform))
+                if max_val > 0:
+                    waveform = waveform / max_val
+                
+                return waveform
+                
+            except Exception as sf_error:
+                logger.warn(f"soundfile 로딩 실패, torchaudio 시도: {sf_error}")
+                # torchaudio 폴백
+                audio_io.seek(0)
+                waveform, sample_rate = torchaudio.load(audio_io)
+                
+                # 모노로 변환
+                if waveform.shape[0] > 1:
+                    waveform = torch.mean(waveform, dim=0, keepdim=True)
+                
+                # 16kHz로 리샘플링
+                if sample_rate != 16000:
+                    resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                    waveform = resampler(waveform)
+                
+                # 정규화
+                max_val = torch.max(torch.abs(waveform))
+                if max_val > 0:
+                    waveform = waveform / max_val
+                
+                return waveform.squeeze(0)
             
         except Exception as e:
             logger.error(f"오디오 전처리 오류: {e}")
-            raise
+            raise ValueError(f"Audio preprocessing failed: {e}")
     
     def analyze_emotion(self, audio_data: bytes) -> Dict[str, Any]:
         """음성 감정 분석 수행"""
@@ -282,6 +324,23 @@ def analyze_emotion_file():
         if file.filename == '':
             return jsonify({
                 'error': '파일명이 없습니다.',
+                'success': False
+            }), 400
+        
+        # 파일 크기 확인 (10MB 제한)
+        file.seek(0, 2)  # 파일 끝으로 이동
+        file_size = file.tell()
+        file.seek(0)  # 파일 시작으로 이동
+        
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            return jsonify({
+                'error': '파일 크기가 너무 큽니다. (최대 10MB)',
+                'success': False
+            }), 400
+        
+        if file_size == 0:
+            return jsonify({
+                'error': '오디오 파일이 비어있습니다.',
                 'success': False
             }), 400
         
