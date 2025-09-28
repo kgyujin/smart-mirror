@@ -1,6 +1,8 @@
 const axios = require('axios');
 const record = require('node-record-lpcm16').record;
 const { exec } = require('child_process');
+const wav = require('wav');
+const fs = require('fs');
 const { 
   ETRI_API_KEY,
   ETRI_API_URL,
@@ -325,12 +327,36 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
                         const fullAudioBuffer = Buffer.concat(emotionAudioBuffer);
                         log.info(`📊 수집된 음성 데이터: ${fullAudioBuffer.length} bytes (${emotionAudioBuffer.length} 청크)`);
                         
-                        emotionResult = await analyzeEmotion(fullAudioBuffer);
-                        if (emotionResult && emotionResult.success) {
-                          log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
-                        } else {
-                          log.warn('감정 분석 실패 또는 신뢰도 부족');
-                        }
+                        const fullPcmBuffer = Buffer.concat(emotionAudioBuffer);
+
+                        // PCM → WAV 변환
+                        const wavWriter = new wav.Writer({
+                          sampleRate: 16000,
+                          channels: 1,
+                          bitDepth: 16
+                        });
+
+                        let wavBuffer = Buffer.alloc(0);
+                        wavWriter.on('data', (chunk) => {
+                          wavBuffer = Buffer.concat([wavBuffer, chunk]);
+                        });
+
+                        wavWriter.write(fullPcmBuffer);
+                        wavWriter.end();
+
+                        // WAV 버퍼가 준비되면 감정 분석 서버로 전송
+                        wavWriter.on('finish', async () => {
+                          // (선택) tmp/last_upload.wav로 저장
+                          fs.writeFileSync('./tmp/last_upload.wav', wavBuffer);
+
+                          // 감정 분석 서버로 전송
+                          emotionResult = await analyzeEmotion(wavBuffer);
+                          if (emotionResult && emotionResult.success) {
+                            log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+                          } else {
+                            log.warn('감정 분석 실패 또는 신뢰도 부족');
+                          }
+                        });
                       }
                       
                       // processRecognizedCommand 함수 호출 (감정 데이터 포함)
