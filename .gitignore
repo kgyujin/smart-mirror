@@ -83,3 +83,5 @@ Thumbs.db
 *.swp
 *.swo
 
+
+wav2vec2_checkpoints/
