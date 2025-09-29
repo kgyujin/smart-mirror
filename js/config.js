@@ -34,7 +34,7 @@ const WAKEWORD_TEST = /(미러야|밀어야|미뤄야|미로야|미라야|미러
 const WAKEWORD_REMOVE = /(미러야|밀어야|미뤄야|미로야|미라야|미러|미로|미라|hi\s*mirror|하이\s*미러|하이미러)/ig; // for .replace
 
 // 감정 분석 서버 설정
-const EMOTION_SERVER_URL = process.env.EMOTION_SERVER_URL || 'http://192.168.1.100:5050';
+const EMOTION_SERVER_URL = process.env.EMOTION_SERVER_URL || 'http://192.168.0.162:5050';
 
 // 감정 분석 오디오 포맷/파라미터
 const EMOTION_AUDIO_FORMAT = process.env.EMOTION_AUDIO_FORMAT || 'wav'; // wav 고정 전송

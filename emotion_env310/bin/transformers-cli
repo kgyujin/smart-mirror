@@ -1,4 +1,4 @@
-#!/Users/kgyujin/dev/smart-mirror/emotion_env/bin/python3
+#!/Users/kgyujin/dev/smart-mirror/emotion_env310/bin/python3.10
 import sys
 from transformers.commands.transformers_cli import main_cli
 if __name__ == '__main__':
