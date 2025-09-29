@@ -85,7 +85,5 @@ Thumbs.db
 
 
 wav2vec2_checkpoints/
-emotion_env/
-emotion_env310/
 tmp/
 test_audio.wav
