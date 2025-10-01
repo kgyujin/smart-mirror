@@ -40,8 +40,8 @@ const toggleMic = () => {
   if ($('micDot').classList.contains('dot-off') && wsConnection?.readyState === WebSocket.OPEN) {
     // 호출어를 부른 것처럼 활성화
     wsConnection.send(JSON.stringify({
-      type: 'hotword_detected',
-      text: 'UI_CLICK'
+      type: 'status',
+      action: 'wakeup'
     }));
   }
 };

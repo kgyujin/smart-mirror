@@ -7,9 +7,7 @@ const {
   ETRI_API_KEY,
   ETRI_API_URL,
   WAKEWORD_TEST, 
-  WAKEW            // 핵트워드 인식 우선 처리 (품질 검사 전에 먼저 확인)
-            log.verbose('핵트워드 테스트:', cleanText, 'WAKEWORD_TEST.test:', WAKEWORD_TEST.test(cleanText));
-            if (hotwordMode === 'hotword' && (WAKEWORD_TEST.test(cleanText) || cleanText === 'UI_CLICK')) {_REMOVE,
+  WAKEWORD_REMOVE,
   COMMAND_SILENCE_TIMEOUT_MS,
   LISTENING_BROADCAST_INTERVAL_MS,
   AUDIO_CHUNK_SIZE,
