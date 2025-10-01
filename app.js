@@ -169,6 +169,11 @@ app.get('/api/assistant', async (req, res) => {
                   try {
           log.info('스마트 문맥 인식 대화 시스템 시작...');
           
+          // 음성 감정 분석 수행
+          const audioBuffer = fs.readFileSync(outputPath);
+          const emotionResult = await analyzeEmotion(audioBuffer);
+          log.info('😊 음성 감정 분석 결과:', emotionResult);
+          
           // 새로운 스마트 대화 시스템 사용
           const dependencies = {
             conversationContext,
@@ -178,7 +183,8 @@ app.get('/api/assistant', async (req, res) => {
             parseRelativeDate,
             formatKSTTime,
             formatKSTDate,
-            processNewsQuery
+            processNewsQuery,
+            emotion: emotionResult
           };
           
           const assistantResponse = await processRecognizedCommand(query, dependencies);

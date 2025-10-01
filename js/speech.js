@@ -261,6 +261,13 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
               isCollectingEmotionAudio = true;
               log.info('🎤 감정 분석용 음성 수집 시작');
               
+              // 텍스트와 음성 감정 분석 결과를 문맥에 추가
+              const audioBuffer = Buffer.concat(emotionAudioBuffer);
+              const emotionResult = await analyzeEmotion(audioBuffer);
+              context.lastEmotion = emotionResult.emotion;
+              context.lastEmotionIntensity = emotionResult.intensity;
+              log.info('😊 감정 분석 결과:', emotionResult);
+              
               if (broadcast) {
                 broadcast({ type: 'status', status: 'listening_on' });
                 broadcast({ type: 'hotword_detected', text: cleanText });
