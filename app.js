@@ -64,7 +64,6 @@ app.use(express.json());
 
 // 시스템 인스턴스 생성
 const personalizationSystem = new PersonalizationSystem(openai);
-const conversationContext = new ConversationContext();
 
 
 
