@@ -13,7 +13,18 @@ function initWS() {
         if (msg.status === 'listening_on') { setMicUI(true); }
         if (msg.status === 'listening_off') { setMicUI(false); setListeningWindow(0, 0); if (ephemeralEl) { ephemeralEl.remove(); ephemeralEl = null; } }
         if (msg.status === 'hotword_listening') { setMicUI(true, '호출어 대기 중'); setListeningWindow(0, 0); if (ephemeralEl) { ephemeralEl.remove(); ephemeralEl = null; } }
-        if (msg.status === 'wakeup') { addCaption('assistant', '네, 말씀하세요.', { autohideMs: 4000 }); }
+        if (msg.status === 'wakeup') { 
+          // 시스템 상태 변경
+          setMicUI(true);
+          addCaption('assistant', '네, 말씀하세요.', { autohideMs: 4000 });
+          // 마이크 활성화 상태 전환
+          if (window.wsConnection?.readyState === WebSocket.OPEN) {
+            window.wsConnection.send(JSON.stringify({
+              type: 'status',
+              status: 'listening_on'
+            }));
+          }
+        }
         if (msg.status === 'processing') { setListeningWindow(0, 0); }
         if (msg.status === 'listening_window') { setListeningWindow(msg.remainingMs, msg.totalMs); }
         if (msg.status === 'listening_timeout') { addCaption('assistant', '다시 불러주세요.', { autohideMs: 4000 }); setListeningWindow(0,0); }
