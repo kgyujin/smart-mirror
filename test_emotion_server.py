@@ -20,8 +20,6 @@ def test_health_check():
         if response.status_code == 200:
             data = response.json()
             print(f"✅ 서버 상태: {data['status']}")
-            print(f"📱 모델 로드됨: {data['model_loaded']}")
-            print(f"🖥️ 디바이스: {data['device']}")
             return True
         else:
             print(f"❌ 서버 상태 확인 실패: {response.status_code}")
@@ -31,10 +29,14 @@ def test_health_check():
         return False
 
 def create_test_audio():
-    """테스트용 오디오 데이터 생성 (실제로는 WAV 파일을 사용해야 함)"""
-    # 간단한 테스트 데이터 (실제로는 WAV 파일을 base64로 인코딩)
-    test_audio_data = b"RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
-    return base64.b64encode(test_audio_data).decode('utf-8')
+    """테스트용 오디오 데이터 생성 (실제 WAV 파일 사용)"""
+    try:
+        with open('test_audio.wav', 'rb') as f:
+            audio_data = f.read()
+        return base64.b64encode(audio_data).decode('utf-8')
+    except FileNotFoundError:
+        print("❌ test_audio.wav 파일이 없습니다.")
+        return None
 
 def test_emotion_analysis():
     """감정 분석 테스트 (파일 기반)"""

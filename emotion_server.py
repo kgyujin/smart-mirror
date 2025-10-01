@@ -13,10 +13,8 @@ import numpy as np
 import soundfile as sf
 from typing import Dict, Any, Optional
 import warnings
+from transformers import Wav2Vec2ForSequenceClassification, AutoFeatureExtractor
 warnings.filterwarnings("ignore")
-
-# SpeechBrain 관련 import
-from speechbrain.pretrained import EncoderClassifier
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -25,68 +23,77 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-
 class EmotionAnalyzer:
-    """SpeechBrain 기반 고성능 음성 감정 분석기"""
+    """Wav2Vec2 기반 고성능 음성 감정 분석기"""
     def __init__(self):
-        self.classifier = None
+        self.model = None
+        self.feature_extractor = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.emotion_labels = []
+        self.emotion_labels = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
         self.load_model()
 
     def load_model(self):
-        """SpeechBrain 감정 분석 모델 로드"""
+        """감정 분석 모델 초기화"""
         try:
-            logger.info("SpeechBrain 감정 분석 모델 로드 중...")
-            # IEMOCAP 기반 감정 분류 모델 (영어)
-            self.classifier = EncoderClassifier.from_hparams(
-                source="speechbrain/emotion-recognition-wav2vec2-IEMOCAP",
-                run_opts={"device": str(self.device)}
-            )
-            # 라벨 추출
-            self.emotion_labels = self.classifier.hparams.label_encoder.lab2ind.keys()
-            logger.info(f"✅ SpeechBrain 모델 로드 완료 (디바이스: {self.device})")
+            model_name = "Dpngtm/wav2vec2-emotion-recognition"
+            self.model = Wav2Vec2ForSequenceClassification.from_pretrained(model_name).to(self.device)
+            self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+            logger.info("모델 로딩 성공")
         except Exception as e:
-            logger.error(f"❌ SpeechBrain 모델 로드 실패: {e}")
+            logger.error(f"모델 로딩 실패: {e}")
             raise
 
-    def preprocess_audio(self, audio_data: bytes) -> tuple[np.ndarray, int]:
-        """오디오 데이터 전처리 (SpeechBrain 모델 호환)"""
+    def preprocess_audio(self, audio_data: bytes) -> np.ndarray:
+        """오디오 데이터 전처리 (Wav2Vec2 모델 호환)"""
         try:
             if not audio_data or len(audio_data) == 0:
                 logger.warn("빈 오디오 데이터")
                 raise ValueError("Empty audio data")
+
+            # 오디오 데이터 로드
             audio_io = io.BytesIO(audio_data)
-            waveform, sample_rate = sf.read(audio_io, dtype='float32', always_2d=True)
-            # (N, 1) or (N, C) -> (N,)
-            if waveform.shape[1] > 1:
-                waveform = np.mean(waveform, axis=1)
-            else:
-                waveform = waveform[:, 0]
+            try:
+                waveform, sample_rate = torchaudio.load(audio_io)
+                waveform = waveform.numpy()
+            except Exception as e:
+                logger.warning(f"torchaudio 로딩 실패, soundfile 시도: {e}")
+                audio_io.seek(0)  # BytesIO 포인터 리셋
+                waveform, sample_rate = sf.read(audio_io, dtype='float32', always_2d=True)
+                waveform = waveform.T
+
+            # 모노로 변환
+            if waveform.shape[0] > 1:
+                waveform = np.mean(waveform, axis=0, keepdims=True)
+
             # 16kHz로 리샘플링
             if sample_rate != 16000:
                 import librosa
-                waveform = librosa.resample(waveform, orig_sr=sample_rate, target_sr=16000)
-                sample_rate = 16000
+                waveform = librosa.resample(waveform.squeeze(), orig_sr=sample_rate, target_sr=16000)
+                waveform = waveform.reshape(1, -1)
+
             # 최소 길이 패딩 (0.1초)
             min_length = int(16000 * 0.1)
-            if len(waveform) < min_length:
-                waveform = np.pad(waveform, (0, min_length - len(waveform)))
-            # 정규화: float32 [-1, 1] 범위로
-            max_val = np.max(np.abs(waveform))
-            if max_val > 0:
-                waveform = waveform / max_val
+            if waveform.shape[1] < min_length:
+                pad_width = ((0, 0), (0, min_length - waveform.shape[1]))
+                waveform = np.pad(waveform, pad_width)
+
+            # 정규화
             waveform = waveform.astype(np.float32)
-            return waveform, sample_rate
+            if np.abs(waveform).max() > 0:
+                waveform = waveform / np.abs(waveform).max()
+
+            return waveform.squeeze()  # [T,] 형태로 반환
+            
         except Exception as e:
-            logger.error(f"오디오 전처리 오류: {e}")
-            raise ValueError(f"Audio preprocessing failed: {e}")
+            logger.error(f"오디오 전처리 실패: {e}")
+            raise
 
     def analyze_emotion(self, audio_data: bytes) -> Dict[str, Any]:
-        """SpeechBrain 기반 음성 감정 분석 수행"""
+        """Wav2Vec2 기반 음성 감정 분석 수행"""
         try:
             start_time = time.time()
-            waveform, sample_rate = self.preprocess_audio(audio_data)
+            waveform = self.preprocess_audio(audio_data)
+
             if len(waveform) == 0:
                 logger.warn("빈 오디오 데이터")
                 return {
@@ -95,22 +102,34 @@ class EmotionAnalyzer:
                     'error': 'Empty audio data',
                     'success': False
                 }
-            # SpeechBrain 입력: torch.Tensor [1, T]
-            waveform_tensor = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
+
+            # Feature extraction 수행
+            inputs = self.feature_extractor(
+                waveform,
+                sampling_rate=16000,
+                return_tensors="pt",
+                padding=True
+            )
+
+            # GPU로 이동 (필요시)
             if self.device.type == "cuda":
-                waveform_tensor = waveform_tensor.cuda()
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
             # 감정 예측
-            prediction = self.classifier.classify_batch(waveform_tensor)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                logits = outputs.logits
+                probas = torch.softmax(logits, dim=-1)[0]
+
             # 결과 추출
-            predicted_index = int(prediction[3].item())
-            predicted_emotion = self.classifier.hparams.label_encoder.ind2lab[predicted_index]
-            # 확률
-            probas = torch.softmax(prediction[1], dim=-1).cpu().numpy()[0]
+            predicted_index = torch.argmax(probas).item()
+            predicted_emotion = self.emotion_labels[predicted_index]
             confidence = float(probas[predicted_index])
+            
             # 감정별 확률
             emotion_scores = {
-                self.classifier.hparams.label_encoder.ind2lab[i]: float(probas[i])
-                for i in range(len(probas))
+                self.emotion_labels[i]: float(probas[i])
+                for i in range(len(self.emotion_labels))
             }
             processing_time = time.time() - start_time
             result = {
@@ -130,9 +149,6 @@ class EmotionAnalyzer:
                 'error': str(e),
                 'success': False
             }
-
-# 전역 감정 분석기 인스턴스
-emotion_analyzer = EmotionAnalyzer()
 
 def generate_emotion_response(emotion: str, confidence: float) -> str:
     """감정에 따른 자연스러운 응답 생성 (SpeechBrain 라벨 대응)"""
@@ -169,12 +185,16 @@ def generate_emotion_response(emotion: str, confidence: float) -> str:
     emotion_responses = responses.get(emotion, ["어떻게 도와드릴까요?"])
     return random.choice(emotion_responses)
 
-@app.route('/health', methods=['GET'])
+# 전역 변수로 EmotionAnalyzer 인스턴스 생성
+emotion_analyzer = EmotionAnalyzer()
+
+# Flask 라우트
+@app.route('/health')
 def health_check():
     """서버 상태 확인"""
     return jsonify({
         'status': 'healthy',
-        'model_loaded': emotion_analyzer.classifier is not None,
+        'model_loaded': emotion_analyzer.model is not None and emotion_analyzer.feature_extractor is not None,
         'device': str(emotion_analyzer.device),
         'timestamp': time.time()
     })

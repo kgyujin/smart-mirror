@@ -59,6 +59,10 @@
   <!-- JavaScript 모듈들 -->
   <script src="js/client-ui.js"></script>
   <script src="js/client-captions.js"></script>
+  <script>
+    // 마이크 상태 UI 클릭 이벤트 추가
+    document.getElementById('micStatus').addEventListener('click', toggleMic);
+  </script>
   <script src="js/client-data.js"></script>
   <script src="js/client-render.js"></script>
   <script src="js/client-websocket.js"></script>

@@ -1,9 +1,11 @@
 // WebSocket 관리
+let wsConnection;
+
 function initWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => console.log('WS 연결됨');
-  ws.onmessage = (ev) => {
+  wsConnection = new WebSocket(`${proto}://${location.host}`);
+  wsConnection.onopen = () => console.log('WS 연결됨');
+  wsConnection.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'status') {
@@ -41,5 +43,5 @@ function initWS() {
       }
     } catch (e) {}
   };
-  ws.onclose = () => { setMicUI(false); setTimeout(initWS, 2000); };
+  wsConnection.onclose = () => { setMicUI(false); setTimeout(initWS, 2000); };
 }

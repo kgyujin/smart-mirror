@@ -23,6 +23,19 @@ const initializeWebSocket = (server) => {
   wss = new WebSocket.Server({ server });
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'status', status: 'connected' }));
+    
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data);
+        if (message.type === 'hotword_detected') {
+          // 핵트워드 감지 시그널을 서버 로직에 전달
+          broadcast({ type: 'status', status: 'listening_on' });
+          broadcast({ type: 'hotword_detected', text: message.text });
+        }
+      } catch (err) {
+        log.error('WebSocket 메시지 처리 오류:', err);
+      }
+    });
   });
   
   return { wss, broadcast };

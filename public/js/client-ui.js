@@ -36,6 +36,16 @@ const setMicUI = (on, message = null) => {
   $('micText').textContent = message || (on ? '마이크 켜짐' : '마이크 꺼짐');
 };
 
+const toggleMic = () => {
+  if ($('micDot').classList.contains('dot-off') && wsConnection?.readyState === WebSocket.OPEN) {
+    // 호출어를 부른 것처럼 활성화
+    wsConnection.send(JSON.stringify({
+      type: 'hotword_detected',
+      text: 'UI_CLICK'
+    }));
+  }
+};
+
 const setListeningWindow = (remainingMs, totalMs) => {
   const bar = $('listenBar');
   if (!bar) return;
