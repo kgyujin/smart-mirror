@@ -37,12 +37,15 @@ const setMicUI = (on, message = null) => {
 };
 
 const toggleMic = () => {
-  if ($('micDot').classList.contains('dot-off') && wsConnection?.readyState === WebSocket.OPEN) {
-    // 호출어를 부른 것처럼 활성화
-    wsConnection.send(JSON.stringify({
-      type: 'status',
-      action: 'wakeup'
-    }));
+  if ($('micDot').classList.contains('dot-off')) {
+    // 마이크 활성화 상태로 변경
+    setMicUI(true);
+    if (wsConnection?.readyState === WebSocket.OPEN) {
+      wsConnection.send(JSON.stringify({
+        type: 'status',
+        status: 'wakeup'
+      }));
+    }
   }
 };
 
