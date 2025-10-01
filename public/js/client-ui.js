@@ -42,8 +42,9 @@ const toggleMic = () => {
     setMicUI(true);
     if (wsConnection?.readyState === WebSocket.OPEN) {
       wsConnection.send(JSON.stringify({
-        type: 'status',
-        status: 'wakeup'
+        type: 'transcript',
+        text: '미러야',
+        final: true
       }));
     }
   }

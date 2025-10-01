@@ -87,3 +87,4 @@ Thumbs.db
 wav2vec2_checkpoints/
 tmp/
 test_audio.wav
+*last_upload.wav

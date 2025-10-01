@@ -1,10 +1,10 @@
 // WebSocket 관리
-let wsConnection;
+window.wsConnection = null;
 
 function initWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  wsConnection = new WebSocket(`${proto}://${location.host}`);
-  wsConnection.onopen = () => console.log('WS 연결됨');
+  window.wsConnection = new WebSocket(`${proto}://${location.host}`);
+  window.wsConnection.onopen = () => console.log('WS 연결됨');
   wsConnection.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
