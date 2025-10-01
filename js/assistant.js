@@ -49,15 +49,9 @@ const processConversation = async (query, context, openai) => {
     const response = completion.choices[0].message.content;
     log.info('GPT 응답:', response);
     return response;
-
   } catch (error) {
     log.error('GPT 대화 처리 오류:', error);
     return '죄송합니다. 잠시 오류가 발생했습니다. 다시 말씀해주시겠습니까?';
-  }
-    
-  } catch (error) {
-    log.error('대화 처리 오류:', error);
-    return '죄송합니다. 오류가 발생했습니다.';
   }
 };
 
