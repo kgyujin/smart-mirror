@@ -18,6 +18,7 @@ const {
   ALWAYS_LISTEN
 } = require('./js/config');
 const { log } = require('./js/logging');
+const { ConversationContext } = require('./js/conversation');
 const { 
   fetchWeatherData, 
   environmentalAwareness,
