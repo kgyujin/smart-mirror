@@ -1,8 +1,11 @@
+// 필수 라이브러리 임포트
 const axios = require('axios');
 const record = require('node-record-lpcm16').record;
 const { exec } = require('child_process');
 const wav = require('wav');
 const fs = require('fs');
+
+// 설정 및 유틸리티 임포트
 const { 
   ETRI_API_KEY,
   ETRI_API_URL,
@@ -15,9 +18,9 @@ const {
   MAX_CONSECUTIVE_EMPTY
 } = require('./config');
 const { log } = require('./logging');
-const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 
-// 전역 상태 관리
+// 감정 분석 관련 임포트
+const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 const { emotionManager } = require('./conversation');
 
 // 음성 인식 상태 변수
@@ -156,11 +159,6 @@ const isWakewordOnly = (text) => {
 };
 
 // 상태 초기화
-const { log } = require('./logging');
-const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
-const { emotionManager } = require('./conversation');
-
-// 전역 상태 관리 // 현재 감정 상태
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
