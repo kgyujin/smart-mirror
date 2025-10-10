@@ -269,14 +269,8 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
               isCollectingEmotionAudio = true;
               log.info('🎤 감정 분석용 음성 수집 시작');
               
-              // 텍스트와 음성 감정 분석 시작
-              const audioBuffer = Buffer.concat(emotionAudioBuffer);
-              const emotionResult = await analyzeEmotion(audioBuffer);
-              
-              // 감정 분석 결과 업데이트
-              emotionManager.updateEmotionState(emotionResult.emotion, emotionResult.intensity);
-              
-              log.info('😊 감정 분석 결과:', emotionResult);
+              // 기본 감정 상태로 초기화
+              emotionManager.updateEmotionState('neutral', 0.5);
               
               if (broadcast) {
                 const emotionState = emotionManager.getCurrentEmotionState();
@@ -372,17 +366,39 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
                           fs.writeFileSync('./tmp/last_upload.wav', wavBuffer);
 
                           // 감정 분석 서버로 전송
-                          emotionResult = await analyzeEmotion(wavBuffer);
-                          if (emotionResult && emotionResult.success) {
-                            log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
-                          } else {
-                            log.warn('감정 분석 실패 또는 신뢰도 부족');
+                          try {
+                            emotionResult = await analyzeEmotion(wavBuffer);
+                            if (emotionResult && emotionResult.success) {
+                              log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+                            } else {
+                              log.warn('감정 분석 실패 또는 신뢰도 부족');
+                              emotionResult = {
+                                emotion: 'neutral',
+                                intensity: 0.5,
+                                confidence: 0.5
+                              };
+                            }
+                          } catch (error) {
+                            log.error('감정 분석 중 오류:', error);
+                            emotionResult = {
+                              emotion: 'neutral',
+                              intensity: 0.5,
+                              confidence: 0.5
+                            };
                           }
                         });
                       }
                       
                       // processRecognizedCommand 함수 호출 (감정 데이터 포함)
                       if (processRecognizedCommand) {
+                        // 감정 결과가 없으면 기본값 사용
+                        if (!emotionResult) {
+                          emotionResult = {
+                            emotion: 'neutral',
+                            intensity: 0.5,
+                            confidence: 0.5
+                          };
+                        }
                         await processRecognizedCommand(cleanCommand, dependencies, emotionResult);
                         log.info('명령 처리 완료');
                       } else {
