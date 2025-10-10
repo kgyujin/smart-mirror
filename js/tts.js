@@ -246,7 +246,14 @@ const safeTTS = async (text, broadcast) => {
       if (error) {
         log.error('음성 재생 실패:', error.message);
       }
-      try { fs.unlinkSync(wavPath); } catch {}
+      // 안전한 파일 삭제
+      try { 
+        if (fs.existsSync(wavPath)) {
+          fs.unlinkSync(wavPath); 
+        }
+      } catch (deleteErr) {
+        log.warn('TTS 임시 파일 삭제 실패:', deleteErr.message);
+      }
       isTTSActive = false;
       if (broadcast) {
         broadcast({ type: 'tts', status: 'end', text: processedText, delayMs: CAPTION_HIDE_AFTER_TTS_MS });
@@ -254,8 +261,23 @@ const safeTTS = async (text, broadcast) => {
     });
     
     if (currentTTSProcess && typeof currentTTSProcess.on === 'function') {
-      currentTTSProcess.on('exit', () => { currentTTSProcess = null; });
+      currentTTSProcess.on('exit', () => { 
+        currentTTSProcess = null; 
+        // 프로세스 종료 시 임시 파일 정리
+        try {
+          if (fs.existsSync(wavPath)) {
+            fs.unlinkSync(wavPath);
+          }
+        } catch (cleanupErr) {
+          log.warn('프로세스 종료 시 임시 파일 정리 실패:', cleanupErr.message);
+        }
+      });
       currentTTSProcess.on('close', () => { currentTTSProcess = null; });
+      currentTTSProcess.on('error', (err) => {
+        log.error('TTS 프로세스 오류:', err.message);
+        currentTTSProcess = null;
+        isTTSActive = false;
+      });
     }
     
   } catch (e) {
