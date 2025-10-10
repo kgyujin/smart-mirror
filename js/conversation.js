@@ -1,6 +1,5 @@
 const axios = require('axios');
 const { log } = require('./logging');
-const { openai } = require('./config');
 
 // ========== 감정 분석 시스템 ==========
 
@@ -85,7 +84,7 @@ const combineEmotions = (textEmotion, audioEmotion) => {
 
 // ========== 대화 처리 시스템 ==========
 
-const processUserInput = async (input, emotionData) => {
+const processUserInput = async (input, emotionData, openaiClient) => {
   try {
     // 입력 텍스트 감정 분석
     const textEmotion = analyzeEmotion(input);
@@ -139,7 +138,7 @@ const processUserInput = async (input, emotionData) => {
    - 중립: 상황에 따른 적절한 감정 유도`;
 
     // GPT 응답 생성
-    const completion = await openai.chat.completions.create({
+    const completion = await openaiClient.chat.completions.create({
       model: 'gpt-4',
       messages: [
         { role: 'system', content: systemPrompt },
@@ -293,8 +292,31 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
       }
     });
 
-    // GPT를 사용한 응답 생성
-    const response = await processUserInput(command, combinedEmotion);
+    let response;
+
+    // 간단한 명령들은 직접 처리
+    const lowerCommand = command.toLowerCase();
+    if (lowerCommand.includes('시간') || lowerCommand.includes('몇 시')) {
+      const currentTime = formatKSTTime();
+      response = {
+        response: `현재 시간은 ${currentTime}입니다.`,
+        emotion: combinedEmotion
+      };
+    } else if (lowerCommand.includes('날짜') || lowerCommand.includes('몇 일')) {
+      const currentDate = formatKSTDate();
+      response = {
+        response: `오늘은 ${currentDate}입니다.`,
+        emotion: combinedEmotion
+      };
+    } else {
+      // 복잡한 명령은 GPT를 사용한 응답 생성
+      const openaiClient = dependencies && dependencies.openai;
+      if (!openaiClient) {
+        throw new Error('OpenAI 클라이언트가 제공되지 않았습니다.');
+      }
+      
+      response = await processUserInput(command, combinedEmotion, openaiClient);
+    }
     
     // TTS로 응답
     if (dependencies && dependencies.safeTTS) {
