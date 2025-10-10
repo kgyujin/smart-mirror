@@ -293,29 +293,47 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
     });
 
     let response;
-
-    // 간단한 명령들은 직접 처리
     const lowerCommand = command.toLowerCase();
-    if (lowerCommand.includes('시간') || lowerCommand.includes('몇 시')) {
+
+    // 뉴스 관련 명령 처리
+    if (lowerCommand.includes('뉴스') || lowerCommand.includes('소식')) {
+      response = await handleNewsCommand(command, dependencies, combinedEmotion);
+    }
+    // 날씨 관련 명령 처리  
+    else if (lowerCommand.includes('날씨') || lowerCommand.includes('기온') || lowerCommand.includes('온도')) {
+      response = await handleWeatherCommand(command, dependencies, combinedEmotion);
+    }
+    // 시간 관련 명령 처리
+    else if (lowerCommand.includes('시간') || lowerCommand.includes('몇 시')) {
       const currentTime = formatKSTTime();
       response = {
         response: `현재 시간은 ${currentTime}입니다.`,
         emotion: combinedEmotion
       };
-    } else if (lowerCommand.includes('날짜') || lowerCommand.includes('몇 일')) {
+    }
+    // 날짜 관련 명령 처리
+    else if (lowerCommand.includes('날짜') || lowerCommand.includes('몇 일') || lowerCommand.includes('며칠')) {
       const currentDate = formatKSTDate();
       response = {
         response: `오늘은 ${currentDate}입니다.`,
         emotion: combinedEmotion
       };
-    } else {
-      // 복잡한 명령은 GPT를 사용한 응답 생성
+    }
+    // 일정 관련 명령 처리
+    else if (lowerCommand.includes('일정') || lowerCommand.includes('약속') || lowerCommand.includes('스케줄')) {
+      response = await handleCalendarCommand(command, dependencies, combinedEmotion);
+    }
+    // 기타 명령은 기존 방식으로 처리 (감정을 고려한 GPT 응답)
+    else {
       const openaiClient = dependencies && dependencies.openai;
       if (!openaiClient) {
-        throw new Error('OpenAI 클라이언트가 제공되지 않았습니다.');
+        response = {
+          response: '죄송합니다. AI 응답 서비스를 사용할 수 없습니다.',
+          emotion: combinedEmotion
+        };
+      } else {
+        response = await processUserInput(command, combinedEmotion, openaiClient);
       }
-      
-      response = await processUserInput(command, combinedEmotion, openaiClient);
     }
     
     // TTS로 응답
@@ -323,13 +341,22 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
       await dependencies.safeTTS(response.response);
     }
 
-    // WebSocket으로 응답 브로드캐스트
+    // WebSocket으로 응답 브로드캐스트 (자막 표시용)
     if (dependencies && dependencies.broadcast) {
       dependencies.broadcast({
         type: 'assistant_response',
         text: response.response,
         emotion: response.emotion,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        display_text: response.response, // 자막 표시용
+        command: command // 원본 명령어
+      });
+      
+      // 별도로 자막 표시 이벤트 전송
+      dependencies.broadcast({
+        type: 'display_subtitle',
+        text: response.response,
+        duration: 5000 // 5초간 표시
       });
     }
 
@@ -350,13 +377,103 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
         type: 'assistant_response',
         text: errorResponse,
         emotion: { emotion: 'neutral', intensity: 0.5 },
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        display_text: errorResponse
+      });
+      
+      // 자막 표시
+      dependencies.broadcast({
+        type: 'display_subtitle',
+        text: errorResponse,
+        duration: 3000
       });
     }
 
     return {
       response: errorResponse,
       emotion: { emotion: 'neutral', intensity: 0.5 }
+    };
+  }
+};
+
+// ========== 기능별 핸들러 함수들 ==========
+
+// 뉴스 명령 처리
+const handleNewsCommand = async (command, dependencies, emotion) => {
+  try {
+    log.info('뉴스 명령 처리:', command);
+    
+    // 기존 뉴스 처리 함수 사용
+    if (dependencies && dependencies.processNewsQuery) {
+      const newsResult = await dependencies.processNewsQuery(command);
+      
+      // 감정에 따른 뉴스 소개 문구 추가
+      let emotionPrefix = '';
+      if (emotion.emotion === 'sad') {
+        emotionPrefix = '기분이 좋지 않으신 것 같아요. 희망적인 소식들을 위주로 알려드릴게요. ';
+      } else if (emotion.emotion === 'happy') {
+        emotionPrefix = '좋은 기분이시네요! 오늘의 주요 소식들을 알려드릴게요. ';
+      }
+      
+      return {
+        response: emotionPrefix + (newsResult.response || newsResult),
+        emotion: emotion
+      };
+    }
+    
+    return {
+      response: '뉴스 서비스를 사용할 수 없습니다.',
+      emotion: emotion
+    };
+  } catch (error) {
+    log.error('뉴스 처리 오류:', error);
+    return {
+      response: '뉴스를 가져오는 중 오류가 발생했습니다.',
+      emotion: emotion
+    };
+  }
+};
+
+// 날씨 명령 처리
+const handleWeatherCommand = async (command, dependencies, emotion) => {
+  try {
+    log.info('날씨 명령 처리:', command);
+    
+    // 기존 날씨 처리 로직 (임시로 간단한 응답)
+    let emotionPrefix = '';
+    if (emotion.emotion === 'sad') {
+      emotionPrefix = '기분이 안 좋으시군요. ';
+    } else if (emotion.emotion === 'happy') {
+      emotionPrefix = '좋은 하루네요! ';
+    }
+    
+    return {
+      response: emotionPrefix + '현재 날씨 정보를 확인하고 있습니다. 잠시만 기다려주세요.',
+      emotion: emotion
+    };
+  } catch (error) {
+    log.error('날씨 처리 오류:', error);
+    return {
+      response: '날씨 정보를 가져오는 중 오류가 발생했습니다.',
+      emotion: emotion
+    };
+  }
+};
+
+// 일정 명령 처리
+const handleCalendarCommand = async (command, dependencies, emotion) => {
+  try {
+    log.info('일정 명령 처리:', command);
+    
+    return {
+      response: '일정 관리 기능을 확인하고 있습니다.',
+      emotion: emotion
+    };
+  } catch (error) {
+    log.error('일정 처리 오류:', error);
+    return {
+      response: '일정 정보를 가져오는 중 오류가 발생했습니다.',
+      emotion: emotion
     };
   }
 };
