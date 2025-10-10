@@ -312,12 +312,34 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
       };
     }
     // 날짜 관련 명령 처리
-    else if (lowerCommand.includes('날짜') || lowerCommand.includes('몇 일') || lowerCommand.includes('며칠')) {
-      const currentDate = formatKSTDate();
-      response = {
-        response: `오늘은 ${currentDate}입니다.`,
-        emotion: combinedEmotion
-      };
+    else if (lowerCommand.includes('날짜') || lowerCommand.includes('몇 일') || lowerCommand.includes('며칠') || 
+             lowerCommand.includes('요일') || lowerCommand.includes('내일') || lowerCommand.includes('어제') ||
+             lowerCommand.includes('모레') || lowerCommand.includes('글피')) {
+      
+      // 상대적 날짜 파싱
+      const dateInfo = dependencies.parseRelativeDate ? dependencies.parseRelativeDate(command) : null;
+      
+      if (dateInfo && dateInfo.targetDate) {
+        const targetDate = new Date(dateInfo.targetDate);
+        const formattedDate = targetDate.toLocaleDateString('ko-KR', {
+          timeZone: 'Asia/Seoul',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          weekday: 'long'
+        });
+        
+        response = {
+          response: `${dateInfo.description || dateInfo.dayName}은 ${formattedDate}입니다.`,
+          emotion: combinedEmotion
+        };
+      } else {
+        const currentDate = formatKSTDate();
+        response = {
+          response: `오늘은 ${currentDate}입니다.`,
+          emotion: combinedEmotion
+        };
+      }
     }
     // 일정 관련 명령 처리
     else if (lowerCommand.includes('일정') || lowerCommand.includes('약속') || lowerCommand.includes('스케줄')) {
@@ -439,16 +461,35 @@ const handleWeatherCommand = async (command, dependencies, emotion) => {
   try {
     log.info('날씨 명령 처리:', command);
     
-    // 기존 날씨 처리 로직 (임시로 간단한 응답)
-    let emotionPrefix = '';
-    if (emotion.emotion === 'sad') {
-      emotionPrefix = '기분이 안 좋으시군요. ';
-    } else if (emotion.emotion === 'happy') {
-      emotionPrefix = '좋은 하루네요! ';
+    // 기존 날씨 데이터 가져오기
+    if (dependencies.fetchWeatherData) {
+      const weatherData = await dependencies.fetchWeatherData();
+      
+      if (weatherData && weatherData.current) {
+        const temp = Math.round(weatherData.current.temp);
+        const description = weatherData.current.description || '맑음';
+        const humidity = weatherData.current.humidity;
+        
+        let emotionPrefix = '';
+        if (emotion.emotion === 'sad') {
+          if (temp < 10) {
+            emotionPrefix = '기분이 안 좋으신데 날씨도 쌀쌀하네요. 따뜻하게 입으세요. ';
+          } else {
+            emotionPrefix = '기분이 안 좋으시군요. 날씨라도 좋아서 다행이에요. ';
+          }
+        } else if (emotion.emotion === 'happy') {
+          emotionPrefix = '좋은 기분에 날씨도 좋네요! ';
+        }
+        
+        return {
+          response: `${emotionPrefix}현재 기온은 ${temp}도, ${description}입니다. 습도는 ${humidity}%예요.`,
+          emotion: emotion
+        };
+      }
     }
     
     return {
-      response: emotionPrefix + '현재 날씨 정보를 확인하고 있습니다. 잠시만 기다려주세요.',
+      response: '날씨 정보를 확인할 수 없습니다.',
       emotion: emotion
     };
   } catch (error) {
@@ -465,8 +506,56 @@ const handleCalendarCommand = async (command, dependencies, emotion) => {
   try {
     log.info('일정 명령 처리:', command);
     
+    // 상대적 날짜 파싱
+    const dateInfo = dependencies.parseRelativeDate ? dependencies.parseRelativeDate(command) : null;
+    let targetDate = null;
+    let dateDescription = '오늘';
+    
+    if (dateInfo && dateInfo.targetDate) {
+      targetDate = dateInfo.targetDate;
+      dateDescription = dateInfo.description || dateInfo.dayName;
+    }
+    
+    // Google Calendar에서 일정 가져오기
+    if (dependencies.fetchTodayEvents) {
+      const events = await dependencies.fetchTodayEvents(targetDate);
+      
+      if (events && events.length > 0) {
+        let eventList = events.slice(0, 3).map((event, index) => {
+          const startTime = new Date(event.start).toLocaleTimeString('ko-KR', {
+            timeZone: 'Asia/Seoul',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          return `${index + 1}. ${event.summary}${event.isAllDay ? '' : ` (${startTime})`}`;
+        }).join(' ');
+        
+        let emotionPrefix = '';
+        if (emotion.emotion === 'happy') {
+          emotionPrefix = '좋은 하루네요! ';
+        } else if (emotion.emotion === 'sad') {
+          emotionPrefix = '힘든 하루인 것 같아요. ';
+        }
+        
+        return {
+          response: `${emotionPrefix}${dateDescription} 일정입니다. ${eventList}${events.length > 3 ? ` 외 ${events.length - 3}개가 더 있습니다.` : ''}`,
+          emotion: emotion
+        };
+      } else {
+        let emotionPrefix = '';
+        if (emotion.emotion === 'happy') {
+          emotionPrefix = '여유로운 하루네요! ';
+        }
+        
+        return {
+          response: `${emotionPrefix}${dateDescription}은 등록된 일정이 없습니다.`,
+          emotion: emotion
+        };
+      }
+    }
+    
     return {
-      response: '일정 관리 기능을 확인하고 있습니다.',
+      response: '일정 정보를 확인할 수 없습니다.',
       emotion: emotion
     };
   } catch (error) {

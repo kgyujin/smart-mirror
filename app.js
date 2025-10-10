@@ -454,7 +454,16 @@ if (ALWAYS_LISTEN) {
     parseRelativeDate,
     formatKSTTime,
     formatKSTDate,
-    processNewsQuery
+    processNewsQuery,
+    fetchTodayEvents,
+    getRuleBasedAdviceForDay,
+    formatKoreanTime,
+    buildDayContext,
+    fetchWeatherData,
+    environmentalAwareness,
+    getKSTNow,
+    getKoreanDateInfo,
+    fetchKSTNowFromAPI
   };
   
   startContinuousHotwordListener(
