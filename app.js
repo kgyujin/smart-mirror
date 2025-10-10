@@ -57,6 +57,13 @@ const { initializeWebSocket } = require('./js/websocket');
 const app = express();
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
+// 필요한 디렉토리 생성
+const tmpDir = path.join(__dirname, 'tmp');
+if (!fs.existsSync(tmpDir)) {
+  fs.mkdirSync(tmpDir, { recursive: true });
+  log.info('tmp 디렉토리 생성:', tmpDir);
+}
+
 // Express 미들웨어 설정
 app.use(express.static('public'));
 app.use(express.json());

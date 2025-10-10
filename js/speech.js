@@ -4,6 +4,7 @@ const record = require('node-record-lpcm16').record;
 const { exec } = require('child_process');
 const wav = require('wav');
 const fs = require('fs');
+const path = require('path');
 
 // 설정 및 유틸리티 임포트
 const { 
@@ -363,7 +364,18 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
                         // WAV 버퍼가 준비되면 감정 분석 서버로 전송
                         wavWriter.on('finish', async () => {
                           // (선택) tmp/last_upload.wav로 저장
-                          fs.writeFileSync('./tmp/last_upload.wav', wavBuffer);
+                          try {
+                            const tmpDir = path.join(__dirname, '..', 'tmp');
+                            const wavFilePath = path.join(tmpDir, 'last_upload.wav');
+                            
+                            // tmp 디렉토리가 없으면 생성
+                            if (!fs.existsSync(tmpDir)) {
+                              fs.mkdirSync(tmpDir, { recursive: true });
+                            }
+                            fs.writeFileSync(wavFilePath, wavBuffer);
+                          } catch (saveErr) {
+                            log.warn('감정 분석용 음성 파일 저장 실패:', saveErr.message);
+                          }
 
                           // 감정 분석 서버로 전송
                           try {
