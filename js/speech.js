@@ -18,17 +18,25 @@ const { log } = require('./logging');
 const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 
 // 전역 상태 관리
-const conversationContext = require('./conversation');
-let emotionAudioBuffer = [];
-let isCollectingEmotionAudio = false;
+const { emotionManager } = require('./conversation');
+
+// 음성 인식 상태 변수
+let isMicListening = false;
 let hotwordMode = 'hotword';
+let micInstance = null;
+let lastTranscriptAt = 0;
 let commandBuffer = '';
+let listeningWindowInterval = null;
 let audioChunks = [];
-let consecutiveEmptyCount = 0;
+let isProcessingAudio = false;
 let lastRecognizedText = '';
 let lastRecognitionTime = 0;
-let isProcessingAudio = false;
-let micInstance = null;
+let consecutiveEmptyCount = 0;
+let recognitionCooldown = 1000;
+
+// 감정 분석 상태 변수
+let emotionAudioBuffer = [];
+let isCollectingEmotionAudio = false;
 
 /**
  * Fallback implementation for analyzeAudioComprehensive.
@@ -147,23 +155,7 @@ const isWakewordOnly = (text) => {
          normalized === 'himirror' || normalized === '하이미러';
 };
 
-// 음성 인식 상태 관리
-let isMicListening = false;
-let hotwordMode = 'hotword'; // 'hotword' | 'command'
-let micInstance = null;
-let lastTranscriptAt = 0;
-let commandBuffer = '';
-let listeningWindowInterval = null;
-let audioChunks = [];
-let isProcessingAudio = false; // 중복 처리 방지
-let lastRecognizedText = ''; // 마지막 인식된 텍스트
-let consecutiveEmptyCount = 0; // 연속 빈 결과 카운트
-let lastRecognitionTime = 0; // 마지막 인식 시간
-let recognitionCooldown = 1000; // 인식 간 최소 대기 시간 (1초)
-
-// 감정 분석용 전체 음성 버퍼 관리
-let emotionAudioBuffer = []; // 호출어부터 명령 완료까지의 전체 음성
-let isCollectingEmotionAudio = false; // 감정 분석용 음성 수집 중인지
+// 상태 초기화
 const { log } = require('./logging');
 const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 const { emotionManager } = require('./conversation');
