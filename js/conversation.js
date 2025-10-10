@@ -161,82 +161,32 @@ const processUserInput = async (input, emotionData) => {
 
 // ========== 대화 문맥 관리 시스템 ==========
 
-class ConversationContext {
-  constructor() {
-    this.contexts = new Map();
-    this.sessionTimeout = 30 * 60 * 1000; // 30분
-    this.maxContextLength = 20;
-  }
+// 감정 관리 시스템
+const EmotionManager = {
+  currentEmotionState: {
+    emotion: 'neutral',
+    intensity: 0.5,
+    timestamp: Date.now()
+  },
 
-  getUserContext(userId = 'default') {
-    if (!this.contexts.has(userId)) {
-      this.contexts.set(userId, {
-        messages: [],
-        currentTopic: null,
-        lastInteraction: Date.now(),
-        emotionHistory: [],
-        conversationFlow: [],
-        pendingActions: []
-      });
-    }
-    return this.contexts.get(userId);
-  }
-
-  addMessage(userId, role, content, emotion = null) {
-    const context = this.getUserContext(userId);
-    const message = {
-      role,
-      content,
+  // 감정 상태 업데이트
+  updateEmotionState(emotion, intensity) {
+    this.currentEmotionState = {
       emotion,
+      intensity,
       timestamp: Date.now()
     };
-    
-    context.messages.push(message);
-    context.lastInteraction = Date.now();
-    
-    // 감정 히스토리 업데이트
-    if (emotion) {
-      context.emotionHistory.push({
-        ...emotion,
-        timestamp: Date.now()
-      });
-      
-      // 최근 10개 감정만 유지
-      if (context.emotionHistory.length > 10) {
-        context.emotionHistory.shift();
-      }
-    }
-    
-    // 문맥 길이 제한
-    if (context.messages.length > this.maxContextLength) {
-      context.messages.shift();
-    }
-  }
+  },
 
-  getContextSummary(userId) {
-    const context = this.getUserContext(userId);
-    return {
-      currentTopic: context.currentTopic,
-      recentMessages: context.messages.slice(-5),
-      emotionHistory: context.emotionHistory.slice(-3),
-      conversationFlow: context.conversationFlow.slice(-5),
-      pendingActions: context.pendingActions
-    };
+  // 현재 감정 상태 조회
+  getCurrentEmotionState() {
+    return this.currentEmotionState;
   }
-
-  cleanup() {
-    const now = Date.now();
-    for (const [userId, context] of this.contexts.entries()) {
-      if (now - context.lastInteraction > this.sessionTimeout) {
-        this.contexts.delete(userId);
-      }
-    }
-  }
-}
+};
 
 module.exports = {
   analyzeEmotion,
   combineEmotions,
   processUserInput,
-  ConversationContext
+  emotionManager: EmotionManager
 };

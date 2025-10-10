@@ -17,6 +17,19 @@ const {
 const { log } = require('./logging');
 const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
 
+// 전역 상태 관리
+const conversationContext = require('./conversation');
+let emotionAudioBuffer = [];
+let isCollectingEmotionAudio = false;
+let hotwordMode = 'hotword';
+let commandBuffer = '';
+let audioChunks = [];
+let consecutiveEmptyCount = 0;
+let lastRecognizedText = '';
+let lastRecognitionTime = 0;
+let isProcessingAudio = false;
+let micInstance = null;
+
 /**
  * Fallback implementation for analyzeAudioComprehensive.
  * 기존 analyzeAudio가 있다면 위임하고, 없으면 안전한 최소 결과를 반환해 앱이 중단되지 않게 함.
@@ -151,6 +164,11 @@ let recognitionCooldown = 1000; // 인식 간 최소 대기 시간 (1초)
 // 감정 분석용 전체 음성 버퍼 관리
 let emotionAudioBuffer = []; // 호출어부터 명령 완료까지의 전체 음성
 let isCollectingEmotionAudio = false; // 감정 분석용 음성 수집 중인지
+const { log } = require('./logging');
+const { analyzeEmotion, processEmotionResponse } = require('./emotion-analysis');
+const { emotionManager } = require('./conversation');
+
+// 전역 상태 관리 // 현재 감정 상태
 
 const stopListeningWindowTicker = (notifyOff = true, broadcast) => {
   if (listeningWindowInterval) {
@@ -261,15 +279,22 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
               isCollectingEmotionAudio = true;
               log.info('🎤 감정 분석용 음성 수집 시작');
               
-              // 텍스트와 음성 감정 분석 결과를 문맥에 추가
+              // 텍스트와 음성 감정 분석 시작
               const audioBuffer = Buffer.concat(emotionAudioBuffer);
               const emotionResult = await analyzeEmotion(audioBuffer);
-              context.lastEmotion = emotionResult.emotion;
-              context.lastEmotionIntensity = emotionResult.intensity;
+              
+              // 감정 분석 결과 업데이트
+              emotionManager.updateEmotionState(emotionResult.emotion, emotionResult.intensity);
+              
               log.info('😊 감정 분석 결과:', emotionResult);
               
               if (broadcast) {
-                broadcast({ type: 'status', status: 'listening_on' });
+                const emotionState = emotionManager.getCurrentEmotionState();
+                broadcast({ 
+                  type: 'status', 
+                  status: 'listening_on',
+                  emotion: emotionState 
+                });
                 broadcast({ type: 'hotword_detected', text: cleanText });
               }
               
