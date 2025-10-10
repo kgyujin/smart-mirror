@@ -263,6 +263,101 @@ const EmotionManager = {
   }
 };
 
+// ========== 명령 처리 시스템 ==========
+
+const processRecognizedCommand = async (command, dependencies, emotionData = null) => {
+  try {
+    log.info('명령 처리 시작:', command);
+    
+    // 기본 감정 데이터 설정
+    if (!emotionData) {
+      emotionData = {
+        emotion: 'neutral',
+        intensity: 0.5,
+        confidence: 0.5
+      };
+    }
+
+    // 감정 상태 업데이트
+    EmotionManager.updateEmotionState(emotionData.emotion, emotionData.intensity);
+
+    // 텍스트 감정 분석
+    const textEmotion = analyzeEmotion(command);
+    
+    // 음성과 텍스트 감정 합성
+    const combinedEmotion = combineEmotions(textEmotion, {
+      emotion: emotionData.emotion,
+      probability: {
+        [emotionData.emotion]: emotionData.confidence || 0.5,
+        neutral: 1 - (emotionData.confidence || 0.5)
+      }
+    });
+
+    // GPT를 사용한 응답 생성
+    const response = await processUserInput(command, combinedEmotion);
+    
+    // TTS로 응답
+    if (dependencies && dependencies.safeTTS) {
+      await dependencies.safeTTS(response.response);
+    }
+
+    // WebSocket으로 응답 브로드캐스트
+    if (dependencies && dependencies.broadcast) {
+      dependencies.broadcast({
+        type: 'assistant_response',
+        text: response.response,
+        emotion: response.emotion,
+        timestamp: Date.now()
+      });
+    }
+
+    return response;
+  } catch (error) {
+    log.error('명령 처리 중 오류:', error);
+    
+    const errorResponse = '죄송합니다. 요청을 처리하는 중에 문제가 발생했습니다.';
+    
+    // 오류 응답도 TTS로 재생
+    if (dependencies && dependencies.safeTTS) {
+      await dependencies.safeTTS(errorResponse);
+    }
+
+    // 오류 응답 브로드캐스트
+    if (dependencies && dependencies.broadcast) {
+      dependencies.broadcast({
+        type: 'assistant_response',
+        text: errorResponse,
+        emotion: { emotion: 'neutral', intensity: 0.5 },
+        timestamp: Date.now()
+      });
+    }
+
+    return {
+      response: errorResponse,
+      emotion: { emotion: 'neutral', intensity: 0.5 }
+    };
+  }
+};
+
+// 시간 포맷팅 함수들
+const formatKSTTime = (date = new Date()) => {
+  return date.toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const formatKSTDate = (date = new Date()) => {
+  return date.toLocaleDateString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long'
+  });
+};
+
 // 전역 인스턴스 생성
 const conversationContext = new ConversationContext();
 
@@ -270,6 +365,9 @@ module.exports = {
   analyzeEmotion,
   combineEmotions,
   processUserInput,
+  processRecognizedCommand,
+  formatKSTTime,
+  formatKSTDate,
   emotionManager: EmotionManager,
   ConversationContext,
   conversationContext

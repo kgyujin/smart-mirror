@@ -458,7 +458,7 @@ if (ALWAYS_LISTEN) {
   };
   
   startContinuousHotwordListener(
-    (text) => processRecognizedCommand(text, dependencies),
+    (text, deps, emotionData) => processRecognizedCommand(text, deps, emotionData),
     broadcast,
     dependencies
   );
