@@ -161,6 +161,85 @@ const processUserInput = async (input, emotionData) => {
 
 // ========== 대화 문맥 관리 시스템 ==========
 
+class ConversationContext {
+  constructor() {
+    this.contexts = new Map();
+    this.maxContextLength = 10;
+    this.sessionTimeout = 1000 * 60 * 30; // 30분 세션 타임아웃
+  }
+
+  // 새로운 컨텍스트 생성 또는 기존 컨텍스트 가져오기
+  getOrCreateContext(userId) {
+    if (!this.contexts.has(userId)) {
+      this.contexts.set(userId, {
+        messages: [],
+        currentTopic: null,
+        emotionHistory: [],
+        lastInteraction: Date.now(),
+        conversationFlow: [],
+        pendingActions: []
+      });
+    }
+    return this.contexts.get(userId);
+  }
+
+  // 메시지 추가
+  addMessage(userId, role, content) {
+    const context = this.getOrCreateContext(userId);
+    context.messages.push({
+      role,
+      content,
+      timestamp: Date.now()
+    });
+    context.lastInteraction = Date.now();
+
+    // 컨텍스트 크기 제한
+    if (context.messages.length > this.maxContextLength) {
+      context.messages.shift();
+    }
+  }
+
+  // 감정 추가
+  addEmotion(userId, emotion) {
+    const context = this.getOrCreateContext(userId);
+    if (!context.emotionHistory) {
+      context.emotionHistory = [];
+    }
+    
+    context.emotionHistory.push({
+      emotion: emotion.emotion,
+      intensity: emotion.intensity,
+      timestamp: emotion.timestamp || Date.now()
+    });
+
+    if (context.emotionHistory.length > 10) {
+      context.emotionHistory.shift();
+    }
+  }
+
+  // 컨텍스트 요약 가져오기
+  getContextSummary(userId) {
+    const context = this.getOrCreateContext(userId);
+    return {
+      currentTopic: context.currentTopic,
+      recentMessages: context.messages.slice(-5),
+      emotionHistory: context.emotionHistory.slice(-3),
+      conversationFlow: context.conversationFlow.slice(-5),
+      pendingActions: context.pendingActions
+    };
+  }
+
+  // 세션 타임아웃 체크 및 정리
+  cleanup() {
+    const now = Date.now();
+    for (const [userId, context] of this.contexts.entries()) {
+      if (now - context.lastInteraction > this.sessionTimeout) {
+        this.contexts.delete(userId);
+      }
+    }
+  }
+}
+
 // 감정 관리 시스템
 const EmotionManager = {
   currentEmotionState: {
@@ -184,9 +263,14 @@ const EmotionManager = {
   }
 };
 
+// 전역 인스턴스 생성
+const conversationContext = new ConversationContext();
+
 module.exports = {
   analyzeEmotion,
   combineEmotions,
   processUserInput,
-  emotionManager: EmotionManager
+  emotionManager: EmotionManager,
+  ConversationContext,
+  conversationContext
 };

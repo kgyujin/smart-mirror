@@ -63,8 +63,7 @@ app.use(express.json());
 
 // 시스템 인스턴스 생성
 const personalizationSystem = new PersonalizationSystem(openai);
-const conversationContext = new ConversationContext();
-
+const { conversationContext } = require('./js/conversation');
 
 // WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
