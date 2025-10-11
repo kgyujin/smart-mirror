@@ -48,6 +48,30 @@ function initWS() {
           const delay = Number(msg.delayMs || 3000);
           if (last) setTimeout(() => { last.style.opacity = '0'; setTimeout(() => last.remove(), 400); }, delay);
         }
+      } else if (msg.type === 'calendar_update') {
+        // 🚀 캘린더 실시간 업데이트 처리
+        console.log(`📅 실시간 캘린더 업데이트 수신! (변경 #${msg.updateCount || '?'}) - ${msg.reason || 'unknown'}`);
+        
+        if (msg.events) {
+          renderCalendar(msg.events);
+          console.log(`📅 ${msg.events.length}개 일정으로 즉시 업데이트됨 (${new Date(msg.timestamp).toLocaleTimeString()})`);
+        } else {
+          // 서버에서 변경 알림만 받은 경우 다시 로드
+          console.log('📅 캘린더 변경 알림 → 데이터 다시 로드');
+          if (typeof loadCalendar === 'function') {
+            loadCalendar();
+          }
+        }
+        
+        // 시각적 피드백 (선택사항)
+        const calendarPanel = document.getElementById('calendar');
+        if (calendarPanel) {
+          calendarPanel.style.transition = 'background-color 0.3s';
+          calendarPanel.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
+          setTimeout(() => {
+            calendarPanel.style.backgroundColor = '';
+          }, 1000);
+        }
       } else if (msg.type === 'personalized_message') {
         // 개인화된 메시지 업데이트
         $('advice').textContent = msg.message || '';

@@ -53,30 +53,54 @@ async function loadWeather() {
   }
 }
 
-// 캘린더 로드 (독립적인 실시간 업데이트)
+// 캘린더 로드 (초고빈도 실시간 업데이트 최적화)
 async function loadCalendar() {
   try {
     const res = await fetch('/api/calendar/today', {
-      // 캐시 무효화 강제
+      // 강력한 캐시 무효화
       cache: 'no-cache',
       headers: {
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       }
     });
     const data = await res.json();
     
-    // API 응답 형식에 따라 이벤트 추출
+    // 새로운 API 응답 형식 처리
     const events = data.events || data || [];
+    const lastUpdated = data.lastUpdated;
+    const count = data.count || events.length;
     
     // 캘린더 렌더링
     renderCalendar(events);
     
-    // 로그 출력 (개발용)
-    console.log(`📅 캘린더 업데이트: ${events.length}개 일정 로드됨 (${new Date().toLocaleTimeString()})`);
+    // 상세 로그 출력 (실시간 추적용)
+    console.log(`📅 캘린더 폴링 업데이트: ${count}개 일정 ${lastUpdated ? `(서버: ${new Date(lastUpdated).toLocaleTimeString()})` : ''} → 클라이언트: ${new Date().toLocaleTimeString()}`);
+    
+    // 성공 시 시각적 피드백 (아주 미묘한)
+    const calendarHeader = document.querySelector('#calendar h2');
+    if (calendarHeader) {
+      calendarHeader.style.transition = 'color 0.2s';
+      calendarHeader.style.color = '#4CAF50';
+      setTimeout(() => {
+        calendarHeader.style.color = '';
+      }, 500);
+    }
     
   } catch (e) {
     console.warn('캘린더 로드 실패', e);
     // 오류 시 빈 배열로 렌더링
     renderCalendar([]);
+    
+    // 오류 시 시각적 피드백
+    const calendarHeader = document.querySelector('#calendar h2');
+    if (calendarHeader) {
+      calendarHeader.style.transition = 'color 0.2s';
+      calendarHeader.style.color = '#f44336';
+      setTimeout(() => {
+        calendarHeader.style.color = '';
+      }, 1000);
+    }
   }
 }

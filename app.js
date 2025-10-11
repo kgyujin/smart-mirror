@@ -274,11 +274,44 @@ app.post('/api/news', async (req, res) => {
 // 캘린더 API
 app.get('/api/calendar/today', async (req, res) => {
   try {
+    // 캐시 무효화 헤더 설정 (실시간 업데이트 보장)
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
     const events = await fetchTodayEvents();
-    res.json({ events });
-  } catch (e) {
-    log.error('캘린더 today 오류:', e.message);
-    res.status(500).json({ error: '캘린더를 불러오지 못했습니다.' });
+    
+    // 응답에 타임스탬프 포함
+    res.json({
+      events: events,
+      lastUpdated: new Date().toISOString(),
+      count: events.length
+    });
+  } catch (error) {
+    log.error('캘린더 API 오류:', error);
+    res.status(500).json({ error: 'Failed to fetch calendar events' });
+  }
+});
+
+// 캘린더 수동 새로고침 API 엔드포인트
+app.post('/api/calendar/refresh', async (req, res) => {
+  try {
+    log.info('📅 캘린더 수동 새로고침 요청됨');
+    await checkCalendarUpdates();
+    const events = await fetchTodayEvents();
+    
+    res.json({
+      success: true,
+      message: 'Calendar refreshed',
+      events: events,
+      count: events.length,
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (error) {
+    log.error('캘린더 수동 새로고침 실패:', error);
+    res.status(500).json({ error: 'Failed to refresh calendar' });
   }
 });
 
@@ -480,12 +513,79 @@ if (ALWAYS_LISTEN) {
   );
 }
 
+// 캘린더 실시간 모니터링 시스템 (초고빈도)
+let lastCalendarHash = null;
+let calendarUpdateCount = 0;
+
+const checkCalendarUpdates = async () => {
+  try {
+    const events = await fetchTodayEvents();
+    const currentHash = JSON.stringify(events.map(e => `${e.id}-${e.start}-${e.summary}`).sort());
+    
+    if (lastCalendarHash === null) {
+      // 초기 해시 설정
+      lastCalendarHash = currentHash;
+      log.info(`📅 캘린더 모니터링 시작: ${events.length}개 일정`);
+      return;
+    }
+    
+    if (lastCalendarHash !== currentHash) {
+      calendarUpdateCount++;
+      log.info(`📅 캘린더 변경 감지! (#${calendarUpdateCount}): ${events.length}개 일정 → 즉시 클라이언트 업데이트`);
+      
+      // 모든 WebSocket 클라이언트에 즉시 업데이트 전송
+      if (broadcast) {
+        broadcast({
+          type: 'calendar_update',
+          events: events,
+          timestamp: new Date().toISOString(),
+          updateCount: calendarUpdateCount,
+          reason: 'change_detected'
+        });
+      }
+      
+      lastCalendarHash = currentHash;
+    }
+  } catch (error) {
+    log.warn('캘린더 업데이트 확인 실패:', error.message);
+  }
+};
+
+// 🚀 초고빈도 캘린더 모니터링 (10초마다!)
+setInterval(checkCalendarUpdates, 10 * 1000);
+
+// 추가: 1분마다 강제 체크 (안전장치)
+setInterval(async () => {
+  try {
+    log.debug('📅 캘린더 정기 체크 (1분)');
+    await checkCalendarUpdates();
+  } catch (error) {
+    log.warn('캘린더 정기 체크 실패:', error.message);
+  }
+}, 60 * 1000);
+
+// 초기 캘린더 해시 설정 (5초 후)
+setTimeout(checkCalendarUpdates, 5000);
+
+// 주기적 컨텍스트 정리
+setInterval(() => {
+  conversationContext.cleanup();
+}, 10 * 60 * 1000);
+
 // 프로세스 종료 시 정리
 process.on('SIGINT', () => {
   log.info('서버 종료 중...');
   personalizationSystem.cleanup();
   conversationContext.cleanup();
   process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+  log.error('처리되지 않은 예외 (계속 실행):', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  log.error('처리되지 않은 Promise 거부 (계속 실행):', reason);
 });
 
 // 주기적 컨텍스트 정리 (10분마다)
