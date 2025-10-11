@@ -19,9 +19,7 @@ async function loadSummary() {
     const data = await res.json();
     $('time').textContent = data.time;
     $('date').textContent = data.date;
-    // 개인화된 메시지는 별도로 로드
-    // Calendar
-    renderCalendar(data.events || []);
+    // 개인화된 메시지와 캘린더는 별도로 로드
   } catch (e) { console.warn('요약 로드 실패', e); }
 }
 
@@ -52,5 +50,33 @@ async function loadWeather() {
     $('weatherMeta').textContent = meta.join(' · ');
   } catch (e) {
     console.warn('날씨 로드 실패', e);
+  }
+}
+
+// 캘린더 로드 (독립적인 실시간 업데이트)
+async function loadCalendar() {
+  try {
+    const res = await fetch('/api/calendar/today', {
+      // 캐시 무효화 강제
+      cache: 'no-cache',
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
+    const data = await res.json();
+    
+    // API 응답 형식에 따라 이벤트 추출
+    const events = data.events || data || [];
+    
+    // 캘린더 렌더링
+    renderCalendar(events);
+    
+    // 로그 출력 (개발용)
+    console.log(`📅 캘린더 업데이트: ${events.length}개 일정 로드됨 (${new Date().toLocaleTimeString()})`);
+    
+  } catch (e) {
+    console.warn('캘린더 로드 실패', e);
+    // 오류 시 빈 배열로 렌더링
+    renderCalendar([]);
   }
 }
