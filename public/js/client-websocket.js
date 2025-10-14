@@ -75,6 +75,24 @@ function initWS() {
       } else if (msg.type === 'personalized_message') {
         // 개인화된 메시지 업데이트
         $('advice').textContent = msg.message || '';
+      } else if (msg.type === 'request_face_capture') {
+        // 표정 분석 요청 - Raspberry Pi가 이미지를 보내면 서버로 전달
+        console.log('📸 표정 분석 요청 받음');
+        addCaption('assistant', '표정을 분석 중입니다...', { autohideMs: 3000 });
+      } else if (msg.type === 'request_outfit_capture') {
+        // 옷차림 분석 요청
+        console.log('👔 옷차림 분석 요청 받음');
+        addCaption('assistant', '옷차림을 확인 중입니다...', { autohideMs: 3000 });
+      } else if (msg.type === 'face_emotion_result') {
+        // 표정 분석 결과 표시
+        const emotion = msg.emotion || 'neutral';
+        const confidence = (msg.confidence * 100).toFixed(1);
+        const message = msg.message || `${emotion} 표정이 ${confidence}% 감지되었습니다.`;
+        addCaption('assistant', message, { autohideMs: 8000 });
+      } else if (msg.type === 'outfit_analysis_result') {
+        // 옷차림 분석 결과 표시
+        const message = msg.message || '옷차림 분석이 완료되었습니다.';
+        addCaption('assistant', message, { autohideMs: 8000 });
       }
     } catch (e) {}
   };

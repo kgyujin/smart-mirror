@@ -445,6 +445,67 @@ app.post('/api/personalized-message/change', async (req, res) => {
 
 
 
+// Vision Analysis API - 표정 분석
+app.post('/api/vision/emotion', async (req, res) => {
+  try {
+    log.info('표정 분석 요청 받음');
+    const { image } = req.body;
+    
+    if (!image) {
+      return res.status(400).json({ error: '이미지가 필요합니다.' });
+    }
+
+    // Vision server로 요청 전달
+    const visionResponse = await axios.post('http://localhost:5051/analyze/emotion', {
+      image: image
+    }, {
+      timeout: 30000
+    });
+
+    log.info('표정 분석 완료:', visionResponse.data);
+    res.json(visionResponse.data);
+  } catch (error) {
+    log.error('표정 분석 오류:', error.message);
+    res.status(500).json({ 
+      error: '표정 분석에 실패했습니다.',
+      details: error.message 
+    });
+  }
+});
+
+// Vision Analysis API - 옷차림 분석
+app.post('/api/vision/outfit', async (req, res) => {
+  try {
+    log.info('옷차림 분석 요청 받음');
+    const { image } = req.body;
+    
+    if (!image) {
+      return res.status(400).json({ error: '이미지가 필요합니다.' });
+    }
+
+    // 날씨 정보 가져오기
+    const weatherData = await fetchWeatherData();
+    const temperature = weatherData?.current?.temperature || 20;
+
+    // Vision server로 요청 전달
+    const visionResponse = await axios.post('http://localhost:5051/analyze/outfit', {
+      image: image,
+      temperature: temperature
+    }, {
+      timeout: 30000
+    });
+
+    log.info('옷차림 분석 완료:', visionResponse.data);
+    res.json(visionResponse.data);
+  } catch (error) {
+    log.error('옷차림 분석 오류:', error.message);
+    res.status(500).json({ 
+      error: '옷차림 분석에 실패했습니다.',
+      details: error.message 
+    });
+  }
+});
+
 // 헬스체크 API
 app.get('/api/health', (req, res) => {
   const tokenExists = checkTokenExists();

@@ -264,6 +264,62 @@ const EmotionManager = {
 
 // ========== 명령 처리 시스템 ==========
 
+// 표정 분석 처리
+const handleFaceEmotionCommand = async (command, dependencies, emotionData) => {
+  try {
+    log.info('표정 분석 요청 시작');
+    
+    // WebSocket으로 Raspberry Pi에 이미지 캡처 요청
+    if (dependencies && dependencies.broadcast) {
+      dependencies.broadcast({
+        type: 'request_face_capture',
+        timestamp: Date.now()
+      });
+    }
+
+    // 임시 응답 (실제로는 Raspberry Pi로부터 이미지를 받아 분석)
+    return {
+      response: '잠시만 기다려주세요. 표정을 분석하고 있습니다...',
+      emotion: emotionData,
+      action: 'face_analysis_pending'
+    };
+  } catch (error) {
+    log.error('표정 분석 오류:', error);
+    return {
+      response: '죄송합니다. 표정 분석 중 문제가 발생했습니다.',
+      emotion: emotionData
+    };
+  }
+};
+
+// 옷차림 분석 처리
+const handleOutfitCommand = async (command, dependencies, emotionData) => {
+  try {
+    log.info('옷차림 분석 요청 시작');
+    
+    // WebSocket으로 Raspberry Pi에 이미지 캡처 요청
+    if (dependencies && dependencies.broadcast) {
+      dependencies.broadcast({
+        type: 'request_outfit_capture',
+        timestamp: Date.now()
+      });
+    }
+
+    // 임시 응답
+    return {
+      response: '잠시만 기다려주세요. 옷차림을 확인하고 있습니다...',
+      emotion: emotionData,
+      action: 'outfit_analysis_pending'
+    };
+  } catch (error) {
+    log.error('옷차림 분석 오류:', error);
+    return {
+      response: '죄송합니다. 옷차림 분석 중 문제가 발생했습니다.',
+      emotion: emotionData
+    };
+  }
+};
+
 const processRecognizedCommand = async (command, dependencies, emotionData = null) => {
   try {
     log.info('명령 처리 시작:', command);
@@ -344,6 +400,14 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
     // 일정 관련 명령 처리
     else if (lowerCommand.includes('일정') || lowerCommand.includes('약속') || lowerCommand.includes('스케줄')) {
       response = await handleCalendarCommand(command, dependencies, combinedEmotion);
+    }
+    // 표정 분석 명령 처리
+    else if (lowerCommand.includes('표정') || lowerCommand.includes('얼굴')) {
+      response = await handleFaceEmotionCommand(command, dependencies, combinedEmotion);
+    }
+    // 옷차림 분석 명령 처리
+    else if (lowerCommand.includes('옷') || lowerCommand.includes('차림') || lowerCommand.includes('스타일')) {
+      response = await handleOutfitCommand(command, dependencies, combinedEmotion);
     }
     // 기타 명령은 기존 방식으로 처리 (감정을 고려한 GPT 응답)
     else {
