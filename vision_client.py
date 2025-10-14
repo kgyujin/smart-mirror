@@ -20,19 +20,40 @@ import requests
 from PIL import Image
 import numpy as np
 
+# .env 파일 로딩
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class VisionAnalysisClient:
-    def __init__(self, server_host: str = "192.168.1.100", server_port: int = 5052):
+    def __init__(self, server_host: str = None, server_port: int = None):
         """비전 분석 클라이언트 초기화
         
         Args:
-            server_host: 비전 분석 서버 호스트 (맥북 IP 주소)
-            server_port: 비전 분석 서버 포트
+            server_host: 비전 분석 서버 호스트 (기본값: .env의 VISION_SERVER_IP)
+            server_port: 비전 분석 서버 포트 (기본값: .env의 VISION_SERVER_PORT)
         """
-        self.server_url = f"http://{server_host}:{server_port}"
+        # .env 파일에서 서버 설정만 읽기
+        self.server_host = server_host or os.getenv('VISION_SERVER_IP', '192.168.0.162')
+        self.server_port = server_port or int(os.getenv('VISION_SERVER_PORT', '5051'))
+        self.server_url = f"http://{self.server_host}:{self.server_port}"
+        
+        # 카메라 설정 (기본값 사용)
+        self.camera_index = 0
+        self.camera_width = 640
+        self.camera_height = 480
+        
+        # 촬영 설정 (기본값 사용)
+        self.emotion_capture_count = 3
+        self.emotion_capture_interval = 0.5
+        self.outfit_capture_count = 1
+        
         self.camera = None
         
         # 카메라 초기화
@@ -43,17 +64,17 @@ class VisionAnalysisClient:
     def _init_camera(self):
         """웹캠 초기화"""
         try:
-            logger.info("웹캠 초기화 중...")
+            logger.info(f"웹캠 초기화 중... (장치: /dev/video{self.camera_index})")
             
-            # 카메라 장치 초기화 (0번 기본 카메라)
-            self.camera = cv2.VideoCapture(0)
+            # 카메라 장치 초기화 (.env에서 설정한 인덱스 사용)
+            self.camera = cv2.VideoCapture(self.camera_index)
             
             if not self.camera.isOpened():
-                raise RuntimeError("웹캠을 열 수 없습니다.")
+                raise RuntimeError(f"웹캠을 열 수 없습니다. (장치: /dev/video{self.camera_index})")
             
-            # 카메라 설정
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            # 카메라 설정 (.env에서 설정한 해상도 사용)
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
             self.camera.set(cv2.CAP_PROP_FPS, 30)
             
             # 카메라 워밍업 (첫 몇 프레임은 품질이 안 좋을 수 있음)
@@ -113,9 +134,9 @@ class VisionAnalysisClient:
             return ""
     
     def capture_emotion_photos(self) -> List[str]:
-        """감정 분석용 사진 3장 촬영 (0.5초 간격)"""
+        """감정 분석용 사진 촬영 (.env 설정 사용)"""
         try:
-            logger.info("감정 분석용 사진 촬영 시작...")
+            logger.info("감정 분석용 사진 촬영 시작... (3장, 0.5초 간격)")
             photos = []
             
             for i in range(3):

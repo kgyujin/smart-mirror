@@ -39,12 +39,16 @@ ls -l /dev/video* 2>/dev/null || echo "⚠️  카메라 장치가 감지되지 
 # 테스트 이미지 디렉토리 생성
 mkdir -p test_images
 
+# python-dotenv 설치
+pip install python-dotenv
+
 echo "✅ Vision Client 환경 설정이 완료되었습니다!"
 echo ""
 echo "🎯 다음 단계:"
-echo "1. 시스템을 재부팅하세요: sudo reboot"
-echo "2. 재부팅 후 Vision Client를 실행하세요:"
-echo "   source vision_client_env/bin/activate"
-echo "   python3 vision_client.py --server http://<MACBOOK_IP>:5051"
+echo "1. .env 파일에 Vision Server 정보를 추가하세요:"
+echo "   VISION_SERVER_IP=192.168.0.162"
+echo "   VISION_SERVER_PORT=5051"
 echo ""
-echo "📝 참고: <MACBOOK_IP>를 실제 MacBook IP 주소로 변경하세요."
+echo "2. 시스템을 재부팅하세요: sudo reboot"
+echo "3. 재부팅 후 Vision Client를 실행하세요:"
+echo "   ./vision_client.sh"

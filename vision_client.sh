@@ -3,9 +3,17 @@
 # Vision Client 실행 스크립트
 
 # 기본 설정
-DEFAULT_SERVER="http://localhost:5051"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PATH="$SCRIPT_DIR/vision_client_env"
+
+# .env 파일에서 설정 읽기
+ENV_FILE="$SCRIPT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+    DEFAULT_SERVER="http://${VISION_SERVER_IP:-localhost}:${VISION_SERVER_PORT:-5051}"
+else
+    DEFAULT_SERVER="http://localhost:5051"
+fi
 
 # 도움말 함수
 show_help() {
