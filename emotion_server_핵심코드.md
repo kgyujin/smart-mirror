@@ -7,7 +7,7 @@
 
 ```python
 class EmotionAnalyzer:
-    """Wav2Vec2 기반 음성 감정 분석기"""
+    """Wav2Vec2 기반 음성 감정 분       석기"""
     
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -20,7 +20,7 @@ class EmotionAnalyzer:
         model_name = "Dpngtm/wav2vec2-emotion-recognition"
         self.model = Wav2Vec2ForSequenceClassification.from_pretrained(model_name).to(self.device)
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
-        logger.info("감정 분석 모델 로딩 완료")
+        logger.info("감정 분석 모델 로딩 완료")₩
 ```
 
 ---
