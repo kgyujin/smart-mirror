@@ -12,6 +12,7 @@ import time
 import base64
 import json
 import logging
+import glob
 from typing import List, Dict, Any, Optional
 from io import BytesIO
 
@@ -70,6 +71,40 @@ class VisionAnalysisClient:
         
         logger.info(f"비전 분석 클라이언트 초기화 완료 (서버: {self.server_url})")
     
+    def _find_working_camera(self) -> Optional[str]:
+        """작동하는 카메라 장치 찾기"""
+        # /dev/video* 장치 목록 가져오기
+        video_devices = sorted(glob.glob('/dev/video*'))
+        
+        if not video_devices:
+            logger.error("카메라 장치를 찾을 수 없습니다")
+            return None
+        
+        logger.info(f"사용 가능한 카메라 장치: {video_devices}")
+        
+        # 각 장치를 테스트
+        for device in video_devices:
+            try:
+                # 간단한 테스트 촬영
+                test_path = '/tmp/camera_test.jpg'
+                cmd = ['fswebcam', '-d', device, '-r', '320x240', '--no-banner', '-S', '3', test_path]
+                result = subprocess.run(cmd, capture_output=True, timeout=5)
+                
+                if result.returncode == 0 and os.path.exists(test_path) and os.path.getsize(test_path) > 0:
+                    logger.info(f"✅ 작동하는 카메라 발견: {device}")
+                    os.unlink(test_path)
+                    return device
+                
+                if os.path.exists(test_path):
+                    os.unlink(test_path)
+                    
+            except Exception as e:
+                logger.debug(f"{device} 테스트 실패: {e}")
+                continue
+        
+        logger.error("작동하는 카메라를 찾을 수 없습니다")
+        return None
+    
     def _init_camera(self):
         """웹캠 초기화"""
         try:
@@ -89,7 +124,13 @@ class VisionAnalysisClient:
                 result = subprocess.run(['which', 'fswebcam'], capture_output=True)
                 if result.returncode != 0:
                     raise RuntimeError("fswebcam이 설치되지 않았습니다. 'sudo apt install fswebcam'으로 설치하세요.")
-                self.camera = "fswebcam"  # fswebcam 사용 플래그
+                
+                # 작동하는 카메라 장치 찾기
+                working_device = self._find_working_camera()
+                if not working_device:
+                    raise RuntimeError("작동하는 카메라를 찾을 수 없습니다")
+                
+                self.camera = working_device  # 찾은 장치 경로 저장
             
             # 카메라 워밍업 (첫 몇 프레임은 품질이 안 좋을 수 있음)
             if USE_OPENCV:
@@ -128,14 +169,14 @@ class VisionAnalysisClient:
                 with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
                     tmp_path = tmp.name
                 
-                # fswebcam으로 사진 촬영
+                # fswebcam으로 사진 촬영 (찾은 카메라 장치 사용)
                 cmd = [
                     'fswebcam',
                     '-r', f'{self.camera_width}x{self.camera_height}',
                     '--no-banner',
                     '-S', '10',  # 10 프레임 스킵 (충분한 워밍업)
                     '--jpeg', '85',  # JPEG 품질
-                    '-d', f'/dev/video{self.camera_index}',  # 명시적으로 장치 지정
+                    '-d', self.camera,  # 자동으로 찾은 장치 사용
                     tmp_path
                 ]
                 

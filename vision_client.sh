@@ -85,10 +85,14 @@ if [ ! -f "$SCRIPT_DIR/vision_client.py" ]; then
 fi
 
 # 카메라 장치 확인
-if [ ! -e "/dev/video$CAMERA_INDEX" ]; then
-    echo "⚠️  경고: 카메라 장치 /dev/video$CAMERA_INDEX가 없습니다."
-    echo "📋 사용 가능한 카메라 장치:"
-    ls -l /dev/video* 2>/dev/null || echo "  카메라 장치가 없습니다."
+echo "📷 카메라 장치 확인 중..."
+if ls /dev/video* > /dev/null 2>&1; then
+    VIDEO_COUNT=$(ls /dev/video* 2>/dev/null | wc -l)
+    echo "✅ $VIDEO_COUNT개의 비디오 장치 발견"
+    echo "   (자동으로 작동하는 카메라를 찾습니다)"
+else
+    echo "❌ 카메라 장치를 찾을 수 없습니다."
+    echo "   웹캠이 연결되어 있는지 확인하세요."
 fi
 
 # 서버 연결 테스트
