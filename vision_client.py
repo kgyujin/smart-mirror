@@ -72,7 +72,7 @@ class VisionAnalysisClient:
         logger.info(f"비전 분석 클라이언트 초기화 완료 (서버: {self.server_url})")
     
     def _find_working_camera(self) -> Optional[str]:
-        """작동하는 카메라 장치 찾기"""
+        """작동하는 카메라 장치 찾기 (캡처 가능한 장치만)"""
         # /dev/video* 장치 목록 가져오기
         video_devices = sorted(glob.glob('/dev/video*'))
         
@@ -80,12 +80,41 @@ class VisionAnalysisClient:
             logger.error("카메라 장치를 찾을 수 없습니다")
             return None
         
-        logger.info(f"사용 가능한 카메라 장치: {video_devices}")
+        logger.info(f"비디오 장치 스캔 중... ({len(video_devices)}개 발견)")
         
-        # 각 장치를 테스트
+        # v4l2-ctl로 캡처 가능한 장치만 필터링 (더 빠름)
+        capture_devices = []
         for device in video_devices:
             try:
-                # 간단한 테스트 촬영
+                # v4l2-ctl로 장치 capabilities 확인
+                result = subprocess.run(
+                    ['v4l2-ctl', '-d', device, '--all'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                
+                # Video Capture 기능이 있는지 확인
+                if 'Video Capture' in result.stdout and 'Metadata Capture' not in result.stdout:
+                    capture_devices.append(device)
+                    logger.info(f"  {device}: 캡처 가능 ✓")
+                else:
+                    logger.debug(f"  {device}: 메타데이터/인코더 장치 (스킵)")
+                    
+            except Exception as e:
+                logger.debug(f"  {device}: 확인 실패 ({e})")
+                continue
+        
+        if not capture_devices:
+            logger.warning("v4l2-ctl로 필터링 실패. 모든 장치 테스트...")
+            capture_devices = video_devices
+        else:
+            logger.info(f"캡처 가능한 장치: {len(capture_devices)}개")
+        
+        # 필터링된 장치들을 실제로 테스트
+        for device in capture_devices:
+            try:
+                logger.info(f"  {device} 테스트 중...")
                 test_path = '/tmp/camera_test.jpg'
                 cmd = ['fswebcam', '-d', device, '-r', '320x240', '--no-banner', '-S', '3', test_path]
                 result = subprocess.run(cmd, capture_output=True, timeout=5)
@@ -99,7 +128,7 @@ class VisionAnalysisClient:
                     os.unlink(test_path)
                     
             except Exception as e:
-                logger.debug(f"{device} 테스트 실패: {e}")
+                logger.debug(f"  {device} 테스트 실패: {e}")
                 continue
         
         logger.error("작동하는 카메라를 찾을 수 없습니다")
@@ -464,10 +493,10 @@ def main():
     client = None
     
     try:
-        # 서버 IP 주소 입력 받기 (기본값: 192.168.1.100)
-        server_ip = input("비전 분석 서버 IP 주소를 입력하세요 (기본값: 192.168.1.100): ").strip()
+        # 서버 IP 주소 입력 받기 (기본값: 192.168.0.162)
+        server_ip = input("비전 분석 서버 IP 주소를 입력하세요 (기본값: 192.168.0.162): ").strip()
         if not server_ip:
-            server_ip = "192.168.1.100"
+            server_ip = "192.168.0.162"
         
         # 클라이언트 초기화
         client = VisionAnalysisClient(server_host=server_ip)

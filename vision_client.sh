@@ -29,8 +29,8 @@ show_help() {
     echo "  -h, --help            이 도움말 표시"
     echo ""
     echo "예시:"
-    echo "  $0 --server http://192.168.1.100:5051"
-    echo "  $0 --camera 1 --server http://192.168.1.100:5051"
+    echo "  $0 --server http://192.168.0.162:5051"
+    echo "  $0 --camera 1 --server http://192.168.0.162:5051"
     echo "  $0 --test"
 }
 
