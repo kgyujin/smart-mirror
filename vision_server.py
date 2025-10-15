@@ -195,10 +195,14 @@ class VisionAnalysisServer:
     def analyze_face_emotion(self, image: np.ndarray) -> Dict[str, Any]:
         """얼굴 이미지에서 감정 분석"""
         try:
+            logger.debug(f"이미지 크기: {image.shape}")
+            
             # 얼굴 탐지
             faces = self.detect_faces(image)
+            logger.debug(f"감지된 얼굴 수: {len(faces)}")
             
             if len(faces) == 0:
+                logger.warning("얼굴이 감지되지 않았습니다")
                 return {
                     'success': False,
                     'error': 'No face detected',
@@ -211,14 +215,30 @@ class VisionAnalysisServer:
                 faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
             
             x, y, w, h = faces[0]
+            logger.debug(f"얼굴 영역: x={x}, y={y}, w={w}, h={h}")
+            
+            # 얼굴 영역이 너무 작은지 확인
+            if w < 30 or h < 30:
+                logger.warning(f"얼굴 영역이 너무 작습니다: {w}x{h}")
+                return {
+                    'success': False,
+                    'error': 'Face too small',
+                    'emotion': None,
+                    'confidence': 0.0
+                }
+            
             face_image = image[y:y+h, x:x+w]
+            logger.debug(f"얼굴 이미지 크기: {face_image.shape}")
             
             # PIL Image로 변환 (RGB)
             face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
             face_pil = Image.fromarray(face_rgb)
+            logger.debug(f"PIL 이미지 크기: {face_pil.size}, 모드: {face_pil.mode}")
             
             # 감정 분석
+            logger.debug("감정 분석 모델 실행 중...")
             result = self.emotion_classifier(face_pil)
+            logger.debug(f"감정 분석 결과: {result}")
             
             # 결과 처리
             if result and len(result) > 0:
@@ -226,22 +246,25 @@ class VisionAnalysisServer:
                 emotion_label = self.emotion_labels.get(top_result['label'], 'neutral')
                 confidence = top_result['score']
                 
+                logger.info(f"감정 분석 성공: {emotion_label} (신뢰도: {confidence:.3f})")
+                
                 return {
                     'success': True,
                     'emotion': emotion_label,
-                    'confidence': confidence,
-                    'face_coords': [x, y, w, h]
+                    'confidence': float(confidence),
+                    'face_coords': [int(x), int(y), int(w), int(h)]
                 }
             else:
+                logger.warning("감정 분석 결과가 비어있습니다")
                 return {
                     'success': False,
-                    'error': 'Emotion analysis failed',
+                    'error': 'Emotion analysis failed - empty result',
                     'emotion': None,
                     'confidence': 0.0
                 }
                 
         except Exception as e:
-            logger.error(f"감정 분석 실패: {e}")
+            logger.error(f"감정 분석 실패: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
@@ -391,7 +414,7 @@ class VisionAnalysisServer:
             
             return {
                 'success': True,
-                'is_appropriate': is_appropriate,
+                'is_appropriate': bool(is_appropriate),  # JSON 직렬화 가능하도록 명시적으로 bool 변환
                 'confidence': float(confidence),
                 'weather_category': weather_category,
                 'appropriate_score': float(avg_appropriate),
@@ -400,13 +423,13 @@ class VisionAnalysisServer:
             }
             
         except Exception as e:
-            logger.error(f"옷차림 적절성 분석 실패: {e}")
+            logger.error(f"옷차림 적절성 분석 실패: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
-                'is_appropriate': None,
+                'is_appropriate': False,  # None 대신 False로 명시
                 'confidence': 0.0,
-                'weather_category': None,
+                'weather_category': '',
                 'response_message': "옷차림 분석에 실패했습니다."
             }
     
