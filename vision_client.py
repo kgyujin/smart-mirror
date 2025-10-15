@@ -15,10 +15,11 @@ import logging
 from typing import List, Dict, Any, Optional
 from io import BytesIO
 
-import cv2
 import requests
 from PIL import Image
 import numpy as np
+import subprocess
+import tempfile
 
 # .env 파일 로딩
 try:
@@ -26,6 +27,14 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+# OpenCV 사용 가능 여부 확인
+try:
+    import cv2
+    USE_OPENCV = True
+except ImportError:
+    USE_OPENCV = False
+    print("⚠️  OpenCV를 사용할 수 없습니다. fswebcam을 사용합니다.")
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -64,25 +73,32 @@ class VisionAnalysisClient:
     def _init_camera(self):
         """웹캠 초기화"""
         try:
-            logger.info(f"웹캠 초기화 중... (장치: /dev/video{self.camera_index})")
-            
-            # 카메라 장치 초기화 (.env에서 설정한 인덱스 사용)
-            self.camera = cv2.VideoCapture(self.camera_index)
-            
-            if not self.camera.isOpened():
-                raise RuntimeError(f"웹캠을 열 수 없습니다. (장치: /dev/video{self.camera_index})")
-            
-            # 카메라 설정 (.env에서 설정한 해상도 사용)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
-            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            if USE_OPENCV:
+                logger.info(f"OpenCV로 웹캠 초기화 중... (장치: /dev/video{self.camera_index})")
+                self.camera = cv2.VideoCapture(self.camera_index)
+                
+                if not self.camera.isOpened():
+                    raise RuntimeError(f"웹캠을 열 수 없습니다. (장치: /dev/video{self.camera_index})")
+                
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
+                self.camera.set(cv2.CAP_PROP_FPS, 30)
+            else:
+                logger.info("fswebcam을 사용하여 카메라 초기화")
+                # fswebcam 사용 가능 여부 확인
+                result = subprocess.run(['which', 'fswebcam'], capture_output=True)
+                if result.returncode != 0:
+                    raise RuntimeError("fswebcam이 설치되지 않았습니다. 'sudo apt install fswebcam'으로 설치하세요.")
+                self.camera = "fswebcam"  # fswebcam 사용 플래그
             
             # 카메라 워밍업 (첫 몇 프레임은 품질이 안 좋을 수 있음)
-            for _ in range(5):
-                ret, frame = self.camera.read()
-                if not ret:
-                    raise RuntimeError("카메라에서 프레임을 읽을 수 없습니다.")
-                time.sleep(0.1)
+            if USE_OPENCV:
+                # OpenCV 카메라 워밍업
+                for _ in range(5):
+                    ret, frame = self.camera.read()
+                    if not ret:
+                        raise RuntimeError("카메라에서 프레임을 읽을 수 없습니다.")
+                    time.sleep(0.1)
             
             logger.info("웹캠 초기화 완료!")
             
@@ -90,38 +106,60 @@ class VisionAnalysisClient:
             logger.error(f"웹캠 초기화 실패: {e}")
             raise
     
-    def capture_photo(self) -> Optional[np.ndarray]:
-        """웹캠으로 사진 촬영"""
+    def capture_photo(self) -> Optional[Image.Image]:
+        """웹캠으로 사진 촬영 (PIL Image 반환)"""
         try:
-            if self.camera is None or not self.camera.isOpened():
-                logger.error("카메라가 초기화되지 않았습니다.")
-                return None
-            
-            # 프레임 캡처
-            ret, frame = self.camera.read()
-            
-            if not ret:
-                logger.error("카메라에서 프레임을 캡처할 수 없습니다.")
-                return None
-            
-            return frame
+            if USE_OPENCV:
+                # OpenCV 사용
+                if self.camera is None or not self.camera.isOpened():
+                    logger.error("카메라가 초기화되지 않았습니다.")
+                    return None
+                
+                ret, frame = self.camera.read()
+                if not ret:
+                    logger.error("카메라에서 프레임을 캡처할 수 없습니다.")
+                    return None
+                
+                # BGR을 RGB로 변환하고 PIL Image로 변환
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(frame_rgb)
+            else:
+                # fswebcam 사용 (OpenCV 없음)
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                    tmp_path = tmp.name
+                
+                # fswebcam으로 사진 촬영
+                cmd = [
+                    'fswebcam',
+                    '-r', f'{self.camera_width}x{self.camera_height}',
+                    '--no-banner',
+                    '-S', '5',  # 5 프레임 스킵 (워밍업)
+                    tmp_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    logger.error(f"fswebcam 오류: {result.stderr}")
+                    return None
+                
+                # 이미지 로드
+                image = Image.open(tmp_path)
+                
+                # 임시 파일 삭제
+                os.unlink(tmp_path)
+                
+                return image
             
         except Exception as e:
             logger.error(f"사진 촬영 실패: {e}")
             return None
     
-    def image_to_base64(self, image: np.ndarray) -> str:
-        """OpenCV 이미지를 Base64 문자열로 변환"""
+    def image_to_base64(self, image: Image.Image) -> str:
+        """PIL Image를 Base64 문자열로 변환"""
         try:
-            # OpenCV BGR을 RGB로 변환
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            
-            # PIL Image로 변환
-            pil_image = Image.fromarray(rgb_image)
-            
             # JPEG로 인코딩
             buffer = BytesIO()
-            pil_image.save(buffer, format='JPEG', quality=85)
+            image.save(buffer, format='JPEG', quality=85)
             
             # Base64 인코딩
             image_bytes = buffer.getvalue()
@@ -337,10 +375,12 @@ class VisionAnalysisClient:
     def release_camera(self):
         """카메라 리소스 해제"""
         try:
-            if self.camera is not None:
+            if USE_OPENCV and self.camera is not None and hasattr(self.camera, 'release'):
                 self.camera.release()
                 self.camera = None
                 logger.info("카메라 리소스 해제 완료")
+            else:
+                logger.info("fswebcam은 리소스 해제가 필요 없습니다")
         except Exception as e:
             logger.error(f"카메라 리소스 해제 실패: {e}")
     

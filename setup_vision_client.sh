@@ -10,9 +10,9 @@ sudo apt upgrade -y
 # 필수 시스템 패키지 설치
 echo "📦 필수 패키지 설치 중..."
 sudo apt install -y python3 python3-pip python3-venv
-sudo apt install -y libopencv-dev python3-opencv
-sudo apt install -y libcamera-apps
+sudo apt install -y python3-picamera2 python3-libcamera  # 라즈베리파이 카메라 지원
 sudo apt install -y v4l-utils
+sudo apt install -y fswebcam  # USB 웹캠 지원 (가벼움)
 
 # Python 가상환경 생성
 echo "🐍 Python 가상환경 생성 중..."
@@ -23,10 +23,10 @@ echo "📦 Python 패키지 설치 중..."
 source vision_client_env/bin/activate
 
 pip install --upgrade pip
-pip install opencv-python
 pip install requests
 pip install pillow
 pip install numpy
+# opencv-python은 설치하지 않음 (너무 느림 + 불필요)
 
 # 카메라 권한 설정
 echo "📷 카메라 권한 설정 중..."
