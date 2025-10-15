@@ -177,9 +177,19 @@ class VisionAnalysisServer:
                 minSize=(30, 30)
             )
             
-            return faces.tolist()
+            # numpy array를 list로 변환
+            if isinstance(faces, np.ndarray):
+                if len(faces) == 0:
+                    return []
+                return [tuple(face) for face in faces]
+            elif isinstance(faces, tuple):
+                # 빈 결과인 경우 tuple()로 반환될 수 있음
+                return []
+            else:
+                return list(faces)
+                
         except Exception as e:
-            logger.error(f"얼굴 탐지 실패: {e}")
+            logger.error(f"얼굴 탐지 실패: {e}", exc_info=True)
             return []
     
     def analyze_face_emotion(self, image: np.ndarray) -> Dict[str, Any]:

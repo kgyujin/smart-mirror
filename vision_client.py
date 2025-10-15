@@ -133,20 +133,50 @@ class VisionAnalysisClient:
                     'fswebcam',
                     '-r', f'{self.camera_width}x{self.camera_height}',
                     '--no-banner',
-                    '-S', '5',  # 5 프레임 스킵 (워밍업)
+                    '-S', '10',  # 10 프레임 스킵 (충분한 워밍업)
+                    '--jpeg', '85',  # JPEG 품질
+                    '-d', f'/dev/video{self.camera_index}',  # 명시적으로 장치 지정
                     tmp_path
                 ]
                 
+                logger.info(f"fswebcam 명령: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
                 if result.returncode != 0:
-                    logger.error(f"fswebcam 오류: {result.stderr}")
+                    logger.error(f"fswebcam 반환 코드: {result.returncode}")
+                    logger.error(f"fswebcam stderr: {result.stderr}")
+                    logger.error(f"fswebcam stdout: {result.stdout}")
                     return None
                 
+                # 파일이 생성되었는지 확인
+                if not os.path.exists(tmp_path):
+                    logger.error(f"이미지 파일이 생성되지 않았습니다: {tmp_path}")
+                    return None
+                
+                file_size = os.path.getsize(tmp_path)
+                if file_size == 0:
+                    logger.error(f"이미지 파일 크기가 0입니다: {tmp_path}")
+                    os.unlink(tmp_path)
+                    return None
+                
+                logger.info(f"이미지 파일 생성됨: {tmp_path} ({file_size} bytes)")
+                
                 # 이미지 로드
-                image = Image.open(tmp_path)
+                try:
+                    image = Image.open(tmp_path)
+                    # 이미지를 메모리에 로드
+                    image.load()
+                    logger.info(f"이미지 로드 성공: {image.size}, {image.mode}")
+                except Exception as e:
+                    logger.error(f"이미지 로드 실패: {e}")
+                    os.unlink(tmp_path)
+                    return None
                 
                 # 임시 파일 삭제
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
                 
                 return image
             
