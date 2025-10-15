@@ -72,7 +72,7 @@ class VisionAnalysisClient:
         logger.info(f"비전 분석 클라이언트 초기화 완료 (서버: {self.server_url})")
     
     def _find_working_camera(self) -> Optional[str]:
-        """작동하는 카메라 장치 찾기 (캡처 가능한 장치만)"""
+        """작동하는 카메라 장치 찾기"""
         # /dev/video* 장치 목록 가져오기
         video_devices = sorted(glob.glob('/dev/video*'))
         
@@ -80,58 +80,61 @@ class VisionAnalysisClient:
             logger.error("카메라 장치를 찾을 수 없습니다")
             return None
         
-        logger.info(f"비디오 장치 스캔 중... ({len(video_devices)}개 발견)")
+        logger.info(f"비디오 장치 스캔 중... ({len(video_devices)}개)")
         
-        # v4l2-ctl로 캡처 가능한 장치만 필터링 (더 빠름)
-        capture_devices = []
-        for device in video_devices:
+        # 낮은 번호 장치부터 우선 테스트 (일반적으로 video0, video1이 메인 카메라)
+        priority_devices = [d for d in video_devices if int(d.split('video')[-1]) < 4]
+        other_devices = [d for d in video_devices if int(d.split('video')[-1]) >= 4]
+        
+        test_order = priority_devices + other_devices
+        logger.info(f"우선 테스트: {priority_devices}")
+        
+        # 각 장치를 fswebcam으로 직접 테스트
+        for device in test_order:
             try:
-                # v4l2-ctl로 장치 capabilities 확인
+                logger.info(f"📷 {device} 테스트 중...")
+                test_path = '/tmp/camera_test.jpg'
+                
+                # 기존 테스트 파일 삭제
+                if os.path.exists(test_path):
+                    os.unlink(test_path)
+                
+                # fswebcam으로 실제 촬영 시도
+                cmd = ['fswebcam', '-d', device, '-r', '640x480', '--no-banner', '-S', '5', test_path]
                 result = subprocess.run(
-                    ['v4l2-ctl', '-d', device, '--all'],
-                    capture_output=True,
+                    cmd, 
+                    capture_output=True, 
                     text=True,
-                    timeout=2
+                    timeout=10
                 )
                 
-                # Video Capture 기능이 있는지 확인
-                if 'Video Capture' in result.stdout and 'Metadata Capture' not in result.stdout:
-                    capture_devices.append(device)
-                    logger.info(f"  {device}: 캡처 가능 ✓")
+                # 결과 확인
+                if result.returncode == 0 and os.path.exists(test_path):
+                    file_size = os.path.getsize(test_path)
+                    if file_size > 1000:  # 최소 1KB 이상
+                        logger.info(f"✅ 작동하는 카메라 발견: {device} (이미지 크기: {file_size} bytes)")
+                        os.unlink(test_path)
+                        return device
+                    else:
+                        logger.warning(f"  {device}: 빈 파일 생성됨 ({file_size} bytes)")
                 else:
-                    logger.debug(f"  {device}: 메타데이터/인코더 장치 (스킵)")
-                    
-            except Exception as e:
-                logger.debug(f"  {device}: 확인 실패 ({e})")
-                continue
-        
-        if not capture_devices:
-            logger.warning("v4l2-ctl로 필터링 실패. 모든 장치 테스트...")
-            capture_devices = video_devices
-        else:
-            logger.info(f"캡처 가능한 장치: {len(capture_devices)}개")
-        
-        # 필터링된 장치들을 실제로 테스트
-        for device in capture_devices:
-            try:
-                logger.info(f"  {device} 테스트 중...")
-                test_path = '/tmp/camera_test.jpg'
-                cmd = ['fswebcam', '-d', device, '-r', '320x240', '--no-banner', '-S', '3', test_path]
-                result = subprocess.run(cmd, capture_output=True, timeout=5)
+                    logger.warning(f"  {device}: 촬영 실패")
+                    if result.stderr:
+                        logger.debug(f"    stderr: {result.stderr[:200]}")
                 
-                if result.returncode == 0 and os.path.exists(test_path) and os.path.getsize(test_path) > 0:
-                    logger.info(f"✅ 작동하는 카메라 발견: {device}")
-                    os.unlink(test_path)
-                    return device
-                
+                # 실패한 테스트 파일 정리
                 if os.path.exists(test_path):
                     os.unlink(test_path)
                     
+            except subprocess.TimeoutExpired:
+                logger.warning(f"  {device}: 타임아웃 (10초)")
             except Exception as e:
-                logger.debug(f"  {device} 테스트 실패: {e}")
+                logger.warning(f"  {device}: 오류 - {e}")
                 continue
         
-        logger.error("작동하는 카메라를 찾을 수 없습니다")
+        logger.error("❌ 작동하는 카메라를 찾을 수 없습니다")
+        logger.error("수동 확인: lsusb | grep -i camera")
+        logger.error("수동 확인: v4l2-ctl --list-devices")
         return None
     
     def _init_camera(self):
