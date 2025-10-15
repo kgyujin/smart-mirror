@@ -71,70 +71,77 @@ class VisionAnalysisClient:
         
         logger.info(f"비전 분석 클라이언트 초기화 완료 (서버: {self.server_url})")
     
-    def _find_working_camera(self) -> Optional[str]:
-        """작동하는 카메라 장치 찾기"""
-        # /dev/video* 장치 목록 가져오기
+    def _find_working_camera(self) -> Optional[dict]:
+        """USB 웹캠만 자동 감지하고, 웹캠 이름도 반환"""
+        import re
         video_devices = sorted(glob.glob('/dev/video*'))
-        
         if not video_devices:
             logger.error("카메라 장치를 찾을 수 없습니다")
             return None
-        
-        logger.info(f"비디오 장치 스캔 중... ({len(video_devices)}개)")
-        
-        # 낮은 번호 장치부터 우선 테스트 (일반적으로 video0, video1이 메인 카메라)
-        priority_devices = [d for d in video_devices if int(d.split('video')[-1]) < 4]
-        other_devices = [d for d in video_devices if int(d.split('video')[-1]) >= 4]
-        
-        test_order = priority_devices + other_devices
-        logger.info(f"우선 테스트: {priority_devices}")
-        
-        # 각 장치를 fswebcam으로 직접 테스트
+
+        # lsusb로 USB 웹캠 목록 추출
+        try:
+            lsusb_result = subprocess.run(['lsusb'], capture_output=True, text=True, timeout=3)
+            usb_lines = lsusb_result.stdout.splitlines()
+            webcam_lines = [l for l in usb_lines if re.search(r'(camera|webcam|video)', l, re.IGNORECASE)]
+        except Exception as e:
+            logger.warning(f"lsusb 실행 실패: {e}")
+            webcam_lines = []
+
+        # USB 웹캠 이름 추출
+        webcam_name = None
+        if webcam_lines:
+            # 가장 첫 번째 웹캠 이름 사용
+            match = re.search(r'ID [\w:]+ (.+)', webcam_lines[0])
+            if match:
+                webcam_name = match.group(1).strip()
+            else:
+                webcam_name = webcam_lines[0].strip()
+
+        # video* 장치 중 USB 웹캠만 선별 (v4l2-ctl로 Card type에 USB 포함된 것만)
+        usb_video_devices = []
+        for device in video_devices:
+            try:
+                v4l2_result = subprocess.run(['v4l2-ctl', '-d', device, '--all'], capture_output=True, text=True, timeout=2)
+                if 'Card type' in v4l2_result.stdout and ('USB' in v4l2_result.stdout or (webcam_name and webcam_name in v4l2_result.stdout)):
+                    usb_video_devices.append(device)
+            except Exception as e:
+                logger.debug(f"{device} v4l2-ctl 확인 실패: {e}")
+                continue
+
+        # USB 웹캠 장치만 테스트
+        test_order = usb_video_devices if usb_video_devices else video_devices
+        logger.info(f"USB 웹캠 후보 장치: {test_order}")
+
         for device in test_order:
             try:
                 logger.info(f"📷 {device} 테스트 중...")
                 test_path = '/tmp/camera_test.jpg'
-                
-                # 기존 테스트 파일 삭제
                 if os.path.exists(test_path):
                     os.unlink(test_path)
-                
-                # fswebcam으로 실제 촬영 시도
                 cmd = ['fswebcam', '-d', device, '-r', '640x480', '--no-banner', '-S', '5', test_path]
-                result = subprocess.run(
-                    cmd, 
-                    capture_output=True, 
-                    text=True,
-                    timeout=10
-                )
-                
-                # 결과 확인
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 if result.returncode == 0 and os.path.exists(test_path):
                     file_size = os.path.getsize(test_path)
-                    if file_size > 1000:  # 최소 1KB 이상
-                        logger.info(f"✅ 작동하는 카메라 발견: {device} (이미지 크기: {file_size} bytes)")
+                    if file_size > 1000:
+                        logger.info(f"✅ USB 웹캠 연결됨: {device} (이미지 크기: {file_size} bytes)")
                         os.unlink(test_path)
-                        return device
+                        return {'device': device, 'webcam_name': webcam_name}
                     else:
                         logger.warning(f"  {device}: 빈 파일 생성됨 ({file_size} bytes)")
                 else:
                     logger.warning(f"  {device}: 촬영 실패")
                     if result.stderr:
                         logger.debug(f"    stderr: {result.stderr[:200]}")
-                
-                # 실패한 테스트 파일 정리
                 if os.path.exists(test_path):
                     os.unlink(test_path)
-                    
             except subprocess.TimeoutExpired:
                 logger.warning(f"  {device}: 타임아웃 (10초)")
             except Exception as e:
                 logger.warning(f"  {device}: 오류 - {e}")
                 continue
-        
-        logger.error("❌ 작동하는 카메라를 찾을 수 없습니다")
-        logger.error("수동 확인: lsusb | grep -i camera")
-        logger.error("수동 확인: v4l2-ctl --list-devices")
+
+        logger.error("❌ USB 웹캠을 찾을 수 없습니다. lsusb와 v4l2-ctl로 직접 확인하세요.")
         return None
     
     def _init_camera(self):
@@ -157,12 +164,18 @@ class VisionAnalysisClient:
                 if result.returncode != 0:
                     raise RuntimeError("fswebcam이 설치되지 않았습니다. 'sudo apt install fswebcam'으로 설치하세요.")
                 
-                # 작동하는 카메라 장치 찾기
-                working_device = self._find_working_camera()
-                if not working_device:
-                    raise RuntimeError("작동하는 카메라를 찾을 수 없습니다")
-                
-                self.camera = working_device  # 찾은 장치 경로 저장
+                # USB 웹캠만 자동 감지 및 이름 추출
+                camera_info = self._find_working_camera()
+                if not camera_info:
+                    raise RuntimeError("USB 웹캠을 찾을 수 없습니다")
+                self.camera = camera_info['device']  # 찾은 장치 경로 저장
+                webcam_name = camera_info.get('webcam_name')
+                if webcam_name:
+                    logger.info(f"웹캠 초기화 완료! (장치: {self.camera}, 이름: {webcam_name})")
+                    print(f"✅ USB 웹캠 연결됨: {webcam_name} ({self.camera})")
+                else:
+                    logger.info(f"웹캠 초기화 완료! (장치: {self.camera})")
+                    print(f"✅ USB 웹캠 연결됨: {self.camera}")
             
             # 카메라 워밍업 (첫 몇 프레임은 품질이 안 좋을 수 있음)
             if USE_OPENCV:
