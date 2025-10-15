@@ -164,17 +164,24 @@ class VisionAnalysisServer:
             raise
     
     def detect_faces(self, image: np.ndarray) -> List[Tuple[int, int, int, int]]:
-        """이미지에서 얼굴 영역 탐지"""
+        """이미지에서 얼굴 영역 탐지 (저화질/다양한 조명 환경 최적화)"""
         try:
             # 그레이스케일로 변환
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
-            # 얼굴 탐지
+            # 히스토그램 평활화로 조명 불균형 보정
+            gray = cv2.equalizeHist(gray)
+            
+            # 얼굴 탐지 - 파라미터 최적화
+            # scaleFactor: 1.1 -> 1.05 (더 세밀하게 스캔, 작은 얼굴도 탐지)
+            # minNeighbors: 5 -> 3 (더 관대한 기준, 탐지율 향상)
+            # minSize: (30, 30) -> (20, 20) (더 작은 얼굴도 탐지)
             faces = self.face_cascade.detectMultiScale(
                 gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30)
+                scaleFactor=1.05,
+                minNeighbors=3,
+                minSize=(20, 20),
+                flags=cv2.CASCADE_SCALE_IMAGE
             )
             
             # numpy array를 list로 변환
@@ -400,27 +407,31 @@ class VisionAnalysisServer:
                     inappropriate_scores.append(float(score))
             
             # 평균 점수 계산
-            avg_appropriate = np.mean(appropriate_scores)
-            avg_inappropriate = np.mean(inappropriate_scores)
+            avg_appropriate = float(np.mean(appropriate_scores))
+            avg_inappropriate = float(np.mean(inappropriate_scores))
             
             # 적절성 판단
-            is_appropriate = avg_appropriate > avg_inappropriate
-            confidence = abs(avg_appropriate - avg_inappropriate)
+            is_appropriate = bool(avg_appropriate > avg_inappropriate)
+            confidence = float(abs(avg_appropriate - avg_inappropriate))
             
             # 응답 메시지 생성
             response_message = self._generate_outfit_response(
                 is_appropriate, weather_category, temp, weather_data.get('condition', '')
             )
             
-            return {
+            # JSON 직렬화 가능한 형태로 반환
+            result_dict = {
                 'success': True,
-                'is_appropriate': bool(is_appropriate),  # JSON 직렬화 가능하도록 명시적으로 bool 변환
-                'confidence': float(confidence),
-                'weather_category': weather_category,
-                'appropriate_score': float(avg_appropriate),
-                'inappropriate_score': float(avg_inappropriate),
-                'response_message': response_message
+                'is_appropriate': is_appropriate,
+                'confidence': confidence,
+                'weather_category': str(weather_category),
+                'appropriate_score': avg_appropriate,
+                'inappropriate_score': avg_inappropriate,
+                'response_message': str(response_message)
             }
+            
+            # 최종 안전 검증: sanitize_for_json 적용
+            return sanitize_for_json(result_dict)
             
         except Exception as e:
             logger.error(f"옷차림 적절성 분석 실패: {e}", exc_info=True)
@@ -466,6 +477,25 @@ def get_vision_server():
         vision_server = VisionAnalysisServer()
     return vision_server
 
+def sanitize_for_json(obj):
+    """NumPy/Torch 타입을 JSON 직렬화 가능한 Python 기본 타입으로 변환"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return sanitize_for_json(obj.tolist())
+    elif torch.is_tensor(obj):
+        return sanitize_for_json(obj.cpu().numpy())
+    else:
+        return obj
+
 @app.route('/analyze/emotion', methods=['POST'])
 def analyze_emotion():
     """얼굴 표정 감정 분석 API"""
@@ -489,6 +519,7 @@ def analyze_emotion():
         
         # 각 사진에서 감정 분석
         emotion_results = []
+        error_reasons = []  # 실패 원인 추적
         
         for i, photo_base64 in enumerate(photos):
             try:
@@ -502,37 +533,59 @@ def analyze_emotion():
                     emotion_results.append(result['emotion'])
                     logger.info(f"사진 {i+1}: {result['emotion']} (신뢰도: {result['confidence']:.2f})")
                 else:
-                    logger.warning(f"사진 {i+1} 분석 실패: {result.get('error', 'Unknown error')}")
+                    error_reason = result.get('error', 'Unknown error')
+                    error_reasons.append(error_reason)
+                    logger.warning(f"사진 {i+1} 분석 실패: {error_reason}")
                     
             except Exception as e:
+                error_reasons.append(str(e))
                 logger.error(f"사진 {i+1} 처리 실패: {e}")
                 continue
         
-        # 결과 검증
+        # 결과 검증 - 사용자 친화적 오류 메시지
         if not emotion_results:
+            # 가장 많이 발생한 오류 원인 파악
+            error_counter = Counter(error_reasons)
+            most_common_error = error_counter.most_common(1)[0][0] if error_reasons else 'Unknown error'
+            
+            # 사용자 친화적 메시지 생성
+            if 'No face detected' in most_common_error or 'Face too small' in most_common_error:
+                user_message = '얼굴을 찾을 수 없습니다. 카메라에 더 가까이 다가가 주세요.'
+            elif 'Emotion analysis failed' in most_common_error:
+                user_message = '감정 분석에 실패했습니다. 조명을 밝게 하고 카메라를 정면으로 봐주세요.'
+            else:
+                user_message = '감정 분석에 실패했습니다. 다시 시도해 주세요.'
+            
+            logger.error(f"감정 분석 실패 - 원인: {most_common_error}")
+            
             return jsonify({
                 'success': False,
-                'error': '모든 사진에서 감정 분석에 실패했습니다.'
-            }), 500
+                'error': user_message,
+                'detail': most_common_error,
+                'failed_count': len(error_reasons)
+            }), 400  # 500 -> 400으로 변경 (클라이언트 측 문제)
         
         # 가장 빈번한 감정 선택
         emotion_counter = Counter(emotion_results)
         final_emotion = emotion_counter.most_common(1)[0][0]
-        confidence = emotion_counter[final_emotion] / len(emotion_results)
+        confidence = float(emotion_counter[final_emotion] / len(emotion_results))
         
         # 응답 메시지 생성
         response_messages = server.emotion_responses.get(final_emotion, ["감정을 인식했습니다."])
-        response_message = np.random.choice(response_messages)
+        response_message = str(np.random.choice(response_messages))
         
         logger.info(f"최종 감정: {final_emotion} (신뢰도: {confidence:.2f})")
         
-        return jsonify({
+        result = {
             'success': True,
-            'emotion': final_emotion,
+            'emotion': str(final_emotion),
             'confidence': confidence,
             'response_message': response_message,
-            'analysis_count': len(emotion_results)
-        })
+            'analysis_count': int(len(emotion_results))
+        }
+        
+        # JSON 직렬화 안전성 최종 검증
+        return jsonify(sanitize_for_json(result))
         
     except Exception as e:
         logger.error(f"감정 분석 API 오류: {e}")
@@ -569,6 +622,9 @@ def analyze_outfit():
         
         # 옷차림 적절성 분석
         result = server.analyze_outfit_appropriateness(image, weather_data)
+        
+        # JSON 직렬화 안전성 최종 검증
+        result = sanitize_for_json(result)
         
         logger.info(f"옷차림 분석 결과: {result}")
         
