@@ -290,11 +290,15 @@ class VisionAnalysisClient:
     def capture_emotion_photos(self) -> List[str]:
         """감정 분석용 사진 촬영 (.env 설정 사용)"""
         try:
-            logger.info("감정 분석용 사진 촬영 시작... (3장, 0.5초 간격)")
+            logger.info("감정 분석용 사진 촬영 시작... (3장, 1.0초 간격)")
             photos = []
             
             for i in range(3):
                 logger.info(f"사진 {i+1}/3 촬영 중...")
+                
+                # 첫 번째 사진 전에 안내 메시지
+                if i == 0:
+                    print("💡 카메라를 자연스럽게 보고, 표정을 지어주세요! (거리 상관없음)")
                 
                 # 사진 촬영
                 image = self.capture_photo()
@@ -310,9 +314,9 @@ class VisionAnalysisClient:
                 else:
                     logger.error(f"사진 {i+1} Base64 변환 실패")
                 
-                # 마지막 사진이 아니면 0.5초 대기
+                # 마지막 사진이 아니면 1.0초 대기 (표정 변화 시간 제공)
                 if i < 2:
-                    time.sleep(0.5)
+                    time.sleep(1.0)
             
             logger.info(f"총 {len(photos)}장의 사진 촬영 완료")
             return photos
@@ -549,7 +553,7 @@ def main():
             
             elif choice == '2':
                 print("\n📸 옷차림 분석을 시작합니다...")
-                print("전신이 나오도록 카메라 앞에 서주세요!")
+                print("카메라가 상반신(옷 부분)을 보도록 해주세요! (전신 불필요)")
                 
                 # 날씨 정보 입력
                 try:

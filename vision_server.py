@@ -173,27 +173,38 @@ class VisionAnalysisServer:
             gray = cv2.equalizeHist(gray)
             
             # 얼굴 탐지 - 파라미터 최적화
-            # scaleFactor: 1.1 -> 1.05 (더 세밀하게 스캔, 작은 얼굴도 탐지)
-            # minNeighbors: 5 -> 3 (더 관대한 기준, 탐지율 향상)
-            # minSize: (30, 30) -> (20, 20) (더 작은 얼굴도 탐지)
+            # scaleFactor: 1.05 (더 세밀하게 스캔)
+            # minNeighbors: 3 (더 관대한 기준)
+            # minSize: (30, 30) -> 작은 얼굴도 탐지 (거리 제약 없음)
             faces = self.face_cascade.detectMultiScale(
                 gray,
                 scaleFactor=1.05,
                 minNeighbors=3,
-                minSize=(20, 20),
+                minSize=(30, 30),  # 작은 얼굴도 분석 가능
                 flags=cv2.CASCADE_SCALE_IMAGE
             )
             
-            # numpy array를 list로 변환
-            if isinstance(faces, np.ndarray):
-                if len(faces) == 0:
+            # 안전한 타입 변환
+            try:
+                if isinstance(faces, (tuple, list)) and len(faces) == 0:
                     return []
-                return [tuple(face) for face in faces]
-            elif isinstance(faces, tuple):
-                # 빈 결과인 경우 tuple()로 반환될 수 있음
+                elif isinstance(faces, np.ndarray) and faces.shape[0] == 0:
+                    return []
+                elif isinstance(faces, np.ndarray):
+                    # numpy array를 list of tuple로 변환
+                    result = []
+                    for face in faces:
+                        # face가 numpy array인 경우 tolist()로 변환 후 tuple로
+                        if isinstance(face, np.ndarray):
+                            result.append(tuple(face.tolist()))
+                        else:
+                            result.append(tuple(face))
+                    return result
+                else:
+                    return []
+            except Exception as convert_error:
+                logger.error(f"얼굴 좌표 변환 실패: {convert_error}, faces 타입: {type(faces)}")
                 return []
-            else:
-                return list(faces)
                 
         except Exception as e:
             logger.error(f"얼굴 탐지 실패: {e}", exc_info=True)
@@ -224,9 +235,9 @@ class VisionAnalysisServer:
             x, y, w, h = faces[0]
             logger.debug(f"얼굴 영역: x={x}, y={y}, w={w}, h={h}")
             
-            # 얼굴 영역이 너무 작은지 확인
+            # 얼굴 영역 확인 (최소 크기 완화: 30x30)
             if w < 30 or h < 30:
-                logger.warning(f"얼굴 영역이 너무 작습니다: {w}x{h}")
+                logger.warning(f"얼굴 영역이 너무 작습니다: {w}x{h} (최소 30x30 필요)")
                 return {
                     'success': False,
                     'error': 'Face too small',
@@ -234,24 +245,51 @@ class VisionAnalysisServer:
                     'confidence': 0.0
                 }
             
-            face_image = image[y:y+h, x:x+w]
-            logger.debug(f"얼굴 이미지 크기: {face_image.shape}")
+            # 얼굴 영역에 여백 추가 (20% 확장) - 작은 얼굴일수록 더 많은 컨텍스트 필요
+            margin_ratio = 0.3 if min(w, h) < 80 else 0.2  # 작은 얼굴은 30% 여백
+            margin = int(min(w, h) * margin_ratio)
+            x_margin = max(0, x - margin)
+            y_margin = max(0, y - margin)
+            w_margin = min(image.shape[1], x + w + margin) - x_margin
+            h_margin = min(image.shape[0], y + h + margin) - y_margin
+            
+            face_image = image[y_margin:y_margin+h_margin, x_margin:x_margin+w_margin]
+            logger.debug(f"얼굴 이미지 크기 (여백 포함): {face_image.shape}")
             
             # PIL Image로 변환 (RGB)
             face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
             face_pil = Image.fromarray(face_rgb)
-            logger.debug(f"PIL 이미지 크기: {face_pil.size}, 모드: {face_pil.mode}")
+            
+            # 감정 분석 모델을 위한 크기 조정 + 품질 향상
+            # LANCZOS 리샘플링으로 작은 이미지도 고품질로 확대
+            face_pil_resized = face_pil.resize((224, 224), Image.Resampling.LANCZOS)
+            
+            # 추가: 작은 얼굴일 경우 선명도 향상
+            if min(w, h) < 80:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Sharpness(face_pil_resized)
+                face_pil_resized = enhancer.enhance(1.5)  # 선명도 50% 증가
+            
+            logger.debug(f"PIL 이미지 크기: {face_pil_resized.size}, 모드: {face_pil_resized.mode}")
             
             # 감정 분석
             logger.debug("감정 분석 모델 실행 중...")
-            result = self.emotion_classifier(face_pil)
+            result = self.emotion_classifier(face_pil_resized)
             logger.debug(f"감정 분석 결과: {result}")
             
             # 결과 처리
             if result and len(result) > 0:
+                # 상위 3개 감정 로깅 (디버깅용)
+                top_3 = result[:3] if len(result) >= 3 else result
+                logger.info(f"감정 분석 상위 3개: {[(self.emotion_labels.get(r['label'], r['label']), f'{r['score']:.3f}') for r in top_3]}")
+                
                 top_result = result[0]
                 emotion_label = self.emotion_labels.get(top_result['label'], 'neutral')
                 confidence = top_result['score']
+                
+                # neutral이 너무 높은 신뢰도로 나오는 경우 경고
+                if emotion_label == 'neutral' and confidence > 0.9:
+                    logger.warning(f"⚠️ neutral 신뢰도가 매우 높음 ({confidence:.3f}). 얼굴이 정면이 아니거나 표정이 약할 수 있습니다.")
                 
                 logger.info(f"감정 분석 성공: {emotion_label} (신뢰도: {confidence:.3f})")
                 
@@ -293,74 +331,79 @@ class VisionAnalysisServer:
             return 'hot'
     
     def get_outfit_prompts(self, weather_category: str) -> Tuple[List[str], List[str]]:
-        """날씨 카테고리에 따른 적절한/부적절한 옷차림 프롬프트 생성"""
+        """날씨 카테고리에 따른 적절한/부적절한 옷차림 프롬프트 생성 (부분 이미지용)"""
         outfit_prompts = {
             'very_cold': {
                 'appropriate': [
-                    "a person wearing a heavy winter coat",
-                    "a person in thick winter jacket and scarf",
-                    "a person wearing warm winter clothes",
-                    "a person in padded jacket and gloves"
+                    "thick winter jacket or heavy coat",
+                    "warm padded clothing or winter wear",
+                    "sweater and scarf or winter outfit",
+                    "layered warm clothing or winter attire",
+                    "person wearing thick sleeves or winter coat"  # 상반신만 보여도 판단 가능
                 ],
                 'inappropriate': [
-                    "a person wearing a t-shirt",
-                    "a person in shorts",
-                    "a person wearing summer clothes",
-                    "a person in light clothing"
+                    "thin t-shirt or tank top",
+                    "light summer clothing or short sleeves",
+                    "bare arms or sleeveless outfit",
+                    "summer dress or light fabric"
                 ]
             },
             'cold': {
                 'appropriate': [
-                    "a person wearing a jacket or coat",
-                    "a person in long sleeves and pants",
-                    "a person wearing warm clothes",
-                    "a person in sweater or cardigan"
+                    "jacket or long sleeve shirt",
+                    "sweater or cardigan",
+                    "layered clothing or warm outfit",
+                    "long sleeves or covered arms",
+                    "casual jacket or warm top"
                 ],
                 'inappropriate': [
-                    "a person wearing a t-shirt",
-                    "a person in shorts",
-                    "a person wearing summer dress",
-                    "a person in tank top"
+                    "t-shirt or tank top",
+                    "short sleeves or bare arms",
+                    "summer dress or light top",
+                    "sleeveless clothing"
                 ]
             },
             'mild': {
                 'appropriate': [
-                    "a person wearing light jacket",
-                    "a person in long sleeves",
-                    "a person wearing cardigan",
-                    "a person in comfortable casual clothes"
+                    "light jacket or cardigan",
+                    "long sleeve shirt or casual top",
+                    "comfortable layered clothing",
+                    "spring or fall outfit",
+                    "moderate clothing or casual wear"
                 ],
                 'inappropriate': [
-                    "a person wearing heavy winter coat",
-                    "a person in thick winter jacket",
-                    "a person wearing very light summer clothes"
+                    "heavy winter coat or thick jacket",
+                    "very light summer clothes or tank top",
+                    "thick padded clothing"
                 ]
             },
             'warm': {
                 'appropriate': [
-                    "a person wearing t-shirt",
-                    "a person in light clothes",
-                    "a person wearing casual summer clothes",
-                    "a person in short sleeves"
+                    "t-shirt or light top",
+                    "short sleeves or casual shirt",
+                    "light casual clothing",
+                    "summer outfit or light fabric",
+                    "bare arms or short sleeves"
                 ],
                 'inappropriate': [
-                    "a person wearing heavy jacket",
-                    "a person in winter coat",
-                    "a person wearing thick sweater"
+                    "heavy jacket or winter coat",
+                    "thick sweater or warm clothing",
+                    "long sleeves or layered outfit"
                 ]
             },
             'hot': {
                 'appropriate': [
-                    "a person wearing light summer clothes",
-                    "a person in shorts and t-shirt",
-                    "a person wearing summer dress",
-                    "a person in tank top and shorts"
+                    "light summer clothing or tank top",
+                    "thin fabric or sleeveless top",
+                    "very light clothes or summer wear",
+                    "minimal clothing or breathable fabric",
+                    "bare shoulders or light outfit"
                 ],
                 'inappropriate': [
-                    "a person wearing jacket",
-                    "a person in long sleeves",
-                    "a person wearing winter clothes",
-                    "a person in heavy clothing"
+                    "jacket or long sleeves",
+                    "heavy clothing or thick fabric",
+                    "winter clothes or warm outfit",
+                    "layered clothing or thick top"
                 ]
             }
         }
