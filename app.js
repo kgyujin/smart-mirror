@@ -54,6 +54,14 @@ const {
 } = require('./js/assistant');
 const { initializeWebSocket } = require('./js/websocket');
 
+// ✨ AI 통합 모듈 import 추가
+const {
+  initializeAIModules,
+  processRecognizedCommandWithAI,
+  addAIApiRoutes,
+  enhanceConversationWithAI
+} = require('./ai_integration');
+
 const app = express();
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
@@ -356,7 +364,8 @@ app.post('/api/chat', async (req, res) => {
       processNewsQuery
     };
     
-    const reply = await processRecognizedCommand(message, dependencies);
+    // ✨ AI 강화 대화 처리 사용
+    const reply = await processRecognizedCommandWithAI(message, dependencies);
     res.json({ reply: reply || '' });
   } catch (e) {
     res.status(500).json({ error: '채팅 처리 실패' });
@@ -383,7 +392,7 @@ app.post('/api/mic/toggle', (req, res) => {
     };
     
     startContinuousHotwordListener(
-      (text) => processRecognizedCommand(text, dependencies),
+      (text, deps, emotionData) => processRecognizedCommandWithAI(text, deps, emotionData),
       broadcast,
       dependencies
     );
@@ -530,17 +539,32 @@ app.use((req, res) => {
 });
 
 // 서버 시작
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   log.info(`서버 실행 중: http://localhost:${PORT}`);
   log.info('ETRI 음성인식 기반 스마트 미러 서비스 준비 완료');
   
-  log.info('스마트 문맥 인식 대화 시스템으로 설정되었습니다.');
-  log.info('핫워드 대기 중: "미러야", "밀어야", "미로야", "미라야", "미러", "미로", "미라", "하이미러"');
+  // ✨ AI 모듈 초기화 추가
+  try {
+    const aiInitialized = await initializeAIModules();
+    if (aiInitialized) {
+      log.info('🤖 AI 기능 (감정분석, 표정인식, 옷차림분석) 활성화 완료!');
+    } else {
+      log.warn('⚠️ AI 기능 초기화에 실패했습니다. 기본 기능만 사용됩니다.');
+    }
+  } catch (error) {
+    log.error('AI 모듈 초기화 오류:', error);
+  }
+  
+  log.info('🎭 자연스러운 AI 상호작용이 가능한 스마트 미러 준비 완료!');
+  log.info('💬 "나 오늘 기분이 안 좋아", "오늘 나 어때?" 같은 자연스러운 대화를 시도해보세요!');
 });
 
 // WebSocket 초기화
 const { broadcast: wsbroadcast } = initializeWebSocket(server);
 broadcast = wsbroadcast;
+
+// ✨ AI API 라우트 추가
+addAIApiRoutes(app);
 
 // 개인화 시스템 시작 (WebSocket 초기화 후)
 personalizationSystem.startMessageUpdates(broadcast, environmentalAwareness);
@@ -568,7 +592,7 @@ if (ALWAYS_LISTEN) {
   };
   
   startContinuousHotwordListener(
-    (text, deps, emotionData) => processRecognizedCommand(text, deps, emotionData),
+    (text, deps, emotionData) => processRecognizedCommandWithAI(text, deps, emotionData),
     broadcast,
     dependencies
   );

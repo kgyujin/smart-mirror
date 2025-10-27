@@ -47,15 +47,23 @@ class VisionAnalysisServer:
         # 얼굴 탐지용 Haar Cascade 초기화
         self._init_face_detector()
         
-        # 감정 라벨 매핑
+        # 감정 라벨 매핑 (LABEL_X 형식과 직접 이름 모두 지원)
         self.emotion_labels = {
-            'LABEL_0': 'angry',      # 화남
-            'LABEL_1': 'disgust',    # 혐오
-            'LABEL_2': 'fear',       # 두려움
-            'LABEL_3': 'happy',      # 기쁨
-            'LABEL_4': 'neutral',    # 무표정
-            'LABEL_5': 'sad',        # 슬픔
-            'LABEL_6': 'surprise'    # 놀람
+            'LABEL_0': 'angry',
+            'LABEL_1': 'disgust',
+            'LABEL_2': 'fear',
+            'LABEL_3': 'happy',
+            'LABEL_4': 'neutral',
+            'LABEL_5': 'sad',
+            'LABEL_6': 'surprise',
+            # 모델이 직접 감정 이름을 반환하는 경우 (identity mapping)
+            'angry': 'angry',
+            'disgust': 'disgust',
+            'fear': 'fear',
+            'happy': 'happy',
+            'neutral': 'neutral',
+            'sad': 'sad',
+            'surprise': 'surprise'
         }
         
         # 감정별 응답 메시지
@@ -273,25 +281,30 @@ class VisionAnalysisServer:
             logger.debug(f"PIL 이미지 크기: {face_pil_resized.size}, 모드: {face_pil_resized.mode}")
             
             # 감정 분석
-            logger.debug("감정 분석 모델 실행 중...")
+            logger.info("=== 감정 분석 모델 실행 시작 ===")
             result = self.emotion_classifier(face_pil_resized)
-            logger.debug(f"감정 분석 결과: {result}")
+            logger.info(f"=== 모델 반환 결과 개수: {len(result) if result else 0} ===")
             
             # 결과 처리
             if result and len(result) > 0:
-                # 상위 3개 감정 로깅 (디버깅용)
-                top_3 = result[:3] if len(result) >= 3 else result
-                logger.info(f"감정 분석 상위 3개: {[(self.emotion_labels.get(r['label'], r['label']), f'{r['score']:.3f}') for r in top_3]}")
+                # ⭐ 모든 감정 결과 출력 (디버깅용)
+                logger.info(f"📊 전체 감정 분석 결과:")
+                for i, r in enumerate(result):
+                    emotion_name = self.emotion_labels.get(r['label'], r['label'])
+                    logger.info(f"  {i+1}. {emotion_name}: {r['score']:.4f} (원본 라벨: {r['label']})")
                 
                 top_result = result[0]
+                logger.info(f"🔍 최상위 결과 원본 라벨: '{top_result['label']}' → 매핑 시도")
                 emotion_label = self.emotion_labels.get(top_result['label'], 'neutral')
+                logger.info(f"🔍 매핑 결과: '{emotion_label}'")
                 confidence = top_result['score']
                 
                 # neutral이 너무 높은 신뢰도로 나오는 경우 경고
                 if emotion_label == 'neutral' and confidence > 0.9:
-                    logger.warning(f"⚠️ neutral 신뢰도가 매우 높음 ({confidence:.3f}). 얼굴이 정면이 아니거나 표정이 약할 수 있습니다.")
+                    logger.warning(f"⚠️ neutral 신뢰도가 매우 높음 ({confidence:.4f}). 표정이 약하거나 모델이 다른 감정을 인식하지 못했습니다.")
+                    logger.warning(f"⚠️ 다음 감정 시도: 표정을 더 크게 지어보세요!")
                 
-                logger.info(f"감정 분석 성공: {emotion_label} (신뢰도: {confidence:.3f})")
+                logger.info(f"✅ 최종 감정: {emotion_label} (신뢰도: {confidence:.4f})")
                 
                 return {
                     'success': True,
@@ -379,16 +392,17 @@ class VisionAnalysisServer:
             },
             'warm': {
                 'appropriate': [
-                    "t-shirt or light top",
-                    "short sleeves or casual shirt",
-                    "light casual clothing",
-                    "summer outfit or light fabric",
-                    "bare arms or short sleeves"
+                    "short sleeve t-shirt",
+                    "thin sleeveless tank top",
+                    "light summer shirt with bare arms",
+                    "breathable cotton short sleeves",
+                    "light fabric shirt for hot weather"
                 ],
                 'inappropriate': [
-                    "heavy jacket or winter coat",
-                    "thick sweater or warm clothing",
-                    "long sleeves or layered outfit"
+                    "thick jacket or windbreaker",
+                    "heavy coat or padded clothing",
+                    "long sleeve sweater or warm layers",
+                    "winter clothing or thick fabric"
                 ]
             },
             'hot': {
@@ -425,56 +439,71 @@ class VisionAnalysisServer:
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(rgb_image)
             
-            # 적절한 옷차림과의 유사도 계산
-            appropriate_scores = []
-            for prompt in appropriate_prompts:
-                inputs = self.clip_processor(text=[prompt], images=pil_image, return_tensors="pt", padding=True)
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                
-                with torch.no_grad():
-                    outputs = self.clip_model(**inputs)
-                    logits_per_image = outputs.logits_per_image
-                    score = torch.softmax(logits_per_image, dim=1)[0][0].cpu().numpy()
-                    appropriate_scores.append(float(score))
+            # ⭐ 모든 프롬프트를 한 번에 처리 (올바른 CLIP 사용법)
+            all_prompts = appropriate_prompts + inappropriate_prompts
             
-            # 부적절한 옷차림과의 유사도 계산
-            inappropriate_scores = []
-            for prompt in inappropriate_prompts:
-                inputs = self.clip_processor(text=[prompt], images=pil_image, return_tensors="pt", padding=True)
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                
-                with torch.no_grad():
-                    outputs = self.clip_model(**inputs)
-                    logits_per_image = outputs.logits_per_image
-                    score = torch.softmax(logits_per_image, dim=1)[0][0].cpu().numpy()
-                    inappropriate_scores.append(float(score))
+            inputs = self.clip_processor(text=all_prompts, images=pil_image, return_tensors="pt", padding=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            # 평균 점수 계산
+            with torch.no_grad():
+                outputs = self.clip_model(**inputs)
+                logits_per_image = outputs.logits_per_image  # shape: [1, num_prompts]
+                probs = torch.softmax(logits_per_image, dim=1)[0]  # shape: [num_prompts]
+            
+            # 적절한/부적절한 프롬프트별 확률 분리
+            num_appropriate = len(appropriate_prompts)
+            appropriate_scores = probs[:num_appropriate].cpu().numpy()
+            inappropriate_scores = probs[num_appropriate:].cpu().numpy()
+            
+            logger.info(f"📊 적절한 옷차림 점수: {[f'{s:.4f}' for s in appropriate_scores]}")
+            logger.info(f"📊 부적절한 옷차림 점수: {[f'{s:.4f}' for s in inappropriate_scores]}")
+            
+            # ⭐ 개선: 최대값 기준 점수 계산 (평균보다 더 명확함)
+            max_appropriate = float(np.max(appropriate_scores))
+            max_inappropriate = float(np.max(inappropriate_scores))
             avg_appropriate = float(np.mean(appropriate_scores))
             avg_inappropriate = float(np.mean(inappropriate_scores))
             
-            # 적절성 판단
-            is_appropriate = bool(avg_appropriate > avg_inappropriate)
-            confidence = float(abs(avg_appropriate - avg_inappropriate))
+            logger.info(f"🔍 최대값 - 적절: {max_appropriate:.4f}, 부적절: {max_inappropriate:.4f}")
+            logger.info(f"🔍 평균값 - 적절: {avg_appropriate:.4f}, 부적절: {avg_inappropriate:.4f}")
+            
+            # 적절성 판단: 최대값 기준 (더 확실한 신호)
+            is_appropriate = bool(int(max_appropriate > max_inappropriate))
+            
+            # 신뢰도: 최대값 차이 (더 명확한 신호)
+            confidence_max = float(abs(max_appropriate - max_inappropriate))
+            confidence_avg = float(abs(avg_appropriate - avg_inappropriate))
+            
+            # 최대값 기반 신뢰도 사용 (더 명확함)
+            confidence = confidence_max
+            
+            logger.info(f"🎯 최종 판단: {'적절' if is_appropriate else '부적절'}, 신뢰도: {confidence:.4f}")
             
             # 응답 메시지 생성
             response_message = self._generate_outfit_response(
                 is_appropriate, weather_category, temp, weather_data.get('condition', '')
             )
             
-            # JSON 직렬화 가능한 형태로 반환
+            # JSON 직렬화 가능한 형태로 반환 - 모든 값을 Python 기본 타입으로
             result_dict = {
                 'success': True,
-                'is_appropriate': is_appropriate,
-                'confidence': confidence,
+                'is_appropriate': bool(is_appropriate),
+                'confidence': float(confidence),
                 'weather_category': str(weather_category),
-                'appropriate_score': avg_appropriate,
-                'inappropriate_score': avg_inappropriate,
+                'appropriate_score': float(max_appropriate),  # 최대값 반환
+                'inappropriate_score': float(max_inappropriate),  # 최대값 반환
+                'avg_appropriate_score': float(avg_appropriate),  # 참고용 평균값
+                'avg_inappropriate_score': float(avg_inappropriate),  # 참고용 평균값
                 'response_message': str(response_message)
             }
             
+            logger.info(f"반환 전 result_dict 타입 확인: {[(k, type(v)) for k, v in result_dict.items()]}")
+            
             # 최종 안전 검증: sanitize_for_json 적용
-            return sanitize_for_json(result_dict)
+            result_sanitized = sanitize_for_json(result_dict)
+            logger.info(f"sanitize 후 타입 확인: {[(k, type(v)) for k, v in result_sanitized.items()]}")
+            
+            return result_sanitized
             
         except Exception as e:
             logger.error(f"옷차림 적절성 분석 실패: {e}", exc_info=True)
