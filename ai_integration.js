@@ -5,13 +5,28 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const axios = require('axios');
-const { log } = require('./js/logging');
+const { log } = require('./js/enhanced-logging');
 const { processRecognizedCommand } = require('./js/conversation');
+
+// 날씨 데이터 import 추가 (fetchWeatherData 오류 해결)
+let fetchWeatherData = null;
+try {
+  const weatherModule = require('./js/weather');
+  fetchWeatherData = weatherModule.fetchWeatherData;
+} catch (error) {
+  log.warn('날씨 모듈 import 실패. 옷차림 분석에서 기본값 사용됨:', error.message);
+}
 
 // AI 서버 설정
 const AI_SERVER_HOST = process.env.AI_SERVER_HOST || '192.168.0.162';
-const AI_SERVER_PORT = process.env.AI_SERVER_PORT || '5052';
+const AI_SERVER_PORT = process.env.AI_SERVER_PORT || 5052;  // 문자열 -> 숫자로 변경
 const AI_SERVER_URL = `http://${AI_SERVER_HOST}:${AI_SERVER_PORT}`;
+
+// 포트 설정 검증 및 로깅
+if (!process.env.AI_SERVER_HOST || !process.env.AI_SERVER_PORT) {
+  log.warn('AI_SERVER_HOST 또는 AI_SERVER_PORT가 환경변수에 설정되지 않음');
+  log.info(`기본 AI 서버: ${AI_SERVER_URL}`);
+}
 
 // ========== 1. 오디오 캡처 모듈 ==========
 
@@ -29,53 +44,116 @@ class AudioCapture {
   async captureAudio(duration = 3) {
     return new Promise((resolve, reject) => {
       if (this.isRecording) {
-        reject(new Error('Already recording'));
+        reject(new Error('이미 녹음 중입니다'));
         return;
       }
 
+      // ETRI API 제한을 고려하여 최대 5초로 제한
+      const safeDuration = Math.min(duration, 5);
       const timestamp = Date.now();
       const tempPath = path.join(__dirname, 'tmp', `voice_${timestamp}.wav`);
       
-      // sox 명령어로 오디오 녹음 (라즈베리파이 최적화)
+      // 임시 디렉토리 생성 확인
+      const tmpDir = path.dirname(tempPath);
+      if (!fs.existsSync(tmpDir)) {
+        try {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        } catch (err) {
+          reject(new Error(`임시 디렉토리 생성 실패: ${err.message}`));
+          return;
+        }
+      }
+      
+      // sox 명령어로 오디오 녹음 (ETRI API 최적화)
       const recordCommand = [
         'sox', '-t', 'alsa', 'default',
         '-r', '16000',  // 16kHz 샘플링
         '-c', '1',      // 모노
         '-b', '16',     // 16bit
         tempPath,
-        'trim', '0', duration.toString()
+        'trim', '0', safeDuration.toString(),
+        'gain', '-n'    // 정규화로 음질 향상
       ];
 
       this.isRecording = true;
+      
+      // 타임아웃 설정 (녹음 시간 + 5초)
+      const timeout = setTimeout(() => {
+        this.isRecording = false;
+        this.cleanupAudioFile(tempPath);
+        reject(new Error(`오디오 녹음 타임아웃 (${safeDuration + 5}초 초과)`));
+      }, (safeDuration + 5) * 1000);
+      
       const recordProcess = spawn(recordCommand[0], recordCommand.slice(1));
 
       recordProcess.on('close', (code) => {
+        clearTimeout(timeout);
         this.isRecording = false;
         
         if (code === 0) {
-          // 파일을 Base64로 변환
           try {
+            // 파일 존재 및 크기 확인
+            if (!fs.existsSync(tempPath)) {
+              reject(new Error('녹음된 오디오 파일이 없습니다'));
+              return;
+            }
+            
+            const stats = fs.statSync(tempPath);
+            const maxSize = 1024 * 1024; // 1MB 제한 (ETRI API)
+            
+            if (stats.size > maxSize) {
+              this.cleanupAudioFile(tempPath);
+              reject(new Error(`오디오 파일이 너무 큽니다 (${Math.round(stats.size/1024)}KB > 1MB)`));
+              return;
+            }
+            
+            if (stats.size < 1000) { // 1KB 미만
+              this.cleanupAudioFile(tempPath);
+              reject(new Error('녹음된 오디오가 너무 짧습니다'));
+              return;
+            }
+            
+            // 파일을 Base64로 변환
             const audioBuffer = fs.readFileSync(tempPath);
             const base64Audio = audioBuffer.toString('base64');
             
-            // 임시 파일 삭제
-            fs.unlinkSync(tempPath);
+            // 임시 파일 정리
+            this.cleanupAudioFile(tempPath);
             
-            log.info(`🎤 오디오 캡처 완료: ${audioBuffer.length} bytes`);
+            log.debug(`오디오 녹음 완료: ${audioBuffer.length} bytes (${safeDuration}초)`);
             resolve(base64Audio);
+            
           } catch (error) {
+            this.cleanupAudioFile(tempPath);
             reject(new Error(`오디오 파일 처리 실패: ${error.message}`));
           }
         } else {
+          this.cleanupAudioFile(tempPath);
           reject(new Error(`오디오 녹음 실패: exit code ${code}`));
         }
       });
 
       recordProcess.on('error', (error) => {
+        clearTimeout(timeout);
         this.isRecording = false;
+        this.cleanupAudioFile(tempPath);
         reject(new Error(`오디오 녹음 프로세스 오류: ${error.message}`));
       });
     });
+  }
+  
+  /**
+   * 오디오 파일 안전 삭제
+   * @param {string} filePath 
+   */
+  cleanupAudioFile(filePath) {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      log.warn(`오디오 파일 정리 실패: ${filePath} - ${error.message}`);
+    }
   }
 
   /**
@@ -104,84 +182,171 @@ class ImageCapture {
   }
 
   /**
-   * 단일 이미지 촬영 (Base64 반환)
+   * 단일 이미지 촬영 (Base64 반환) - 안정성 강화 버전
    * @returns {Promise<string>} Base64 이미지 데이터
    */
   async capturePhoto() {
     return new Promise((resolve, reject) => {
       if (this.capturing) {
-        reject(new Error('Already capturing'));
+        reject(new Error('이미 촬영 중입니다'));
         return;
       }
 
       const timestamp = Date.now();
       const tempPath = path.join(__dirname, 'tmp', `photo_${timestamp}.jpg`);
       
-      // fswebcam 명령어로 이미지 촬영
+      // 임시 디렉토리 생성 확인
+      const tmpDir = path.dirname(tempPath);
+      if (!fs.existsSync(tmpDir)) {
+        try {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        } catch (err) {
+          reject(new Error(`임시 디렉토리 생성 실패: ${err.message}`));
+          return;
+        }
+      }
+      
+      // fswebcam 명령어로 이미지 촬영 (타임아웃 설정)
       const captureCommand = [
         'fswebcam',
         '-r', '640x480',
         '--no-banner',
-        '-S', '5',          // 5프레임 스킵 (화질 안정화)
-        '--jpeg', '85',     // JPEG 품질
+        '-S', '8',          // 8프레임 스킵으로 더 안정화
+        '--jpeg', '90',     // 품질 향상
+        '--fps', '15',      // FPS 제한으로 안정성 확보
         '-d', this.device,
         tempPath
       ];
 
       this.capturing = true;
-      exec(captureCommand.join(' '), (error, stdout, stderr) => {
+      
+      // 타임아웃 설정 (10초)
+      const timeout = setTimeout(() => {
+        this.capturing = false;
+        reject(new Error('이미지 촬영 타임아웃 (10초 초과)'));
+      }, 10000);
+
+      exec(captureCommand.join(' '), { timeout: 10000 }, (error, stdout, stderr) => {
+        clearTimeout(timeout);
         this.capturing = false;
         
         if (error) {
+          // 파일 정리
+          this.cleanupFile(tempPath);
           reject(new Error(`이미지 촬영 실패: ${error.message}`));
           return;
         }
 
         try {
+          // 파일 존재 확인
+          if (!fs.existsSync(tempPath)) {
+            reject(new Error('촬영된 이미지 파일이 없습니다'));
+            return;
+          }
+          
+          // 파일 크기 확인
+          const stats = fs.statSync(tempPath);
+          if (stats.size < 1000) { // 1KB 미만
+            this.cleanupFile(tempPath);
+            reject(new Error('촬영된 이미지 크기가 너무 작습니다'));
+            return;
+          }
+          
           // 파일을 Base64로 변환
           const imageBuffer = fs.readFileSync(tempPath);
           const base64Image = imageBuffer.toString('base64');
           
-          // 임시 파일 삭제
-          fs.unlinkSync(tempPath);
+          // 임시 파일 정리
+          this.cleanupFile(tempPath);
           
-          log.info(`📷 이미지 촬영 완료: ${imageBuffer.length} bytes`);
+          log.debug(`이미지 촬영 완료: ${imageBuffer.length} bytes`);
           resolve(base64Image);
+          
         } catch (fileError) {
+          this.cleanupFile(tempPath);
           reject(new Error(`이미지 파일 처리 실패: ${fileError.message}`));
         }
       });
     });
   }
+  
+  /**
+   * 파일 안전 삭제
+   * @param {string} filePath 
+   */
+  cleanupFile(filePath) {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      log.warn(`파일 정리 실패: ${filePath} - ${error.message}`);
+    }
+  }
 
   /**
-   * 연속 이미지 촬영 (표정 분석용 - 5장)
+   * 연속 이미지 촬영 (표정 분석용 - 안정성 강화 버전)
    * @param {number} count - 촬영할 이미지 수
    * @param {number} interval - 촬영 간격 (ms)
    * @returns {Promise<string[]>} Base64 이미지 배열
    */
-  async captureMultiplePhotos(count = 5, interval = 500) {
+  async captureMultiplePhotos(count = 5, interval = 800) {
     const photos = [];
+    const failedAttempts = [];
+    const maxRetries = 2;
     
-    log.info(`📸 연속 촬영 시작: ${count}장, ${interval}ms 간격`);
+    log.info(`연속 촬영 시작: ${count}장, ${interval}ms 간격`);
     
     for (let i = 0; i < count; i++) {
-      try {
-        const photo = await this.capturePhoto();
-        photos.push(photo);
-        log.info(`📷 사진 ${i + 1}/${count} 촬영 완료`);
-        
-        // 마지막 사진이 아니면 대기
-        if (i < count - 1) {
-          await new Promise(resolve => setTimeout(resolve, interval));
+      let retries = 0;
+      let success = false;
+      
+      while (retries <= maxRetries && !success) {
+        try {
+          // 충분한 대기 시간으로 카메라 안정화
+          if (i > 0 || retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, interval));
+          }
+          
+          const photo = await this.capturePhoto();
+          
+          // 이미지 크기 검증
+          if (photo && photo.length > 1000) { // 최소 1KB 이상
+            photos.push(photo);
+            log.info(`사진 ${i + 1}/${count} 촬영 완료`);
+            success = true;
+          } else {
+            throw new Error('이미지 크기가 너무 작음');
+          }
+          
+        } catch (error) {
+          retries++;
+          const errorMsg = `사진 ${i + 1} 촬영 실패 (시도 ${retries}/${maxRetries + 1}): ${error.message}`;
+          
+          if (retries <= maxRetries) {
+            log.warn(errorMsg + ' - 재시도 중...');
+            // 재시도 전 추가 대기
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } else {
+            log.error(errorMsg);
+            failedAttempts.push({ index: i + 1, error: error.message });
+          }
         }
-      } catch (error) {
-        log.error(`사진 ${i + 1} 촬영 실패:`, error);
-        // 실패해도 계속 진행
       }
     }
     
-    log.info(`📸 총 ${photos.length}장 촬영 완료`);
+    // 결과 요약
+    if (failedAttempts.length > 0) {
+      log.warn(`촬영 실패한 이미지: ${failedAttempts.map(f => f.index).join(', ')}`);
+    }
+    
+    log.info(`총 ${photos.length}/${count}장 촬영 완료`);
+    
+    // 최소 1장은 성공해야 함
+    if (photos.length === 0) {
+      throw new Error('모든 이미지 촬영이 실패했습니다');
+    }
+    
     return photos;
   }
 

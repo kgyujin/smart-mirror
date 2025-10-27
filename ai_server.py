@@ -25,14 +25,78 @@ import librosa
 from transformers import pipeline, CLIPProcessor, CLIPModel
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+try:
+    import openai
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+    logger = logging.getLogger(__name__)
+    logger.warning("OpenAI 라이브러리가 설치되지 않음. ChatGPT 기능을 사용하려면 'pip install openai'를 실행하세요.")
+import asyncio
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+# 개선된 로깅 설정
+import sys
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+
+# 로그 레벨 매핑
+level_mapping = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARN': logging.WARNING,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR
+}
+
+# 커스텀 포맷터
+class SmartMirrorFormatter(logging.Formatter):
+    """스마트 미러 전용 로그 포맷터"""
+    
+    def __init__(self):
+        super().__init__()
+        self.log_level = LOG_LEVEL
+        
+        # 이모지 매핑 (INFO 레벨에서는 핵심만)
+        self.emojis = {
+            'DEBUG': '🔍',
+            'INFO': '',      # INFO는 이모지 없이 깔끔하게
+            'WARNING': '⚠️',
+            'ERROR': '❌',
+            'CRITICAL': '💥'
+        }
+    
+    def format(self, record):
+        # LOG_LEVEL에 따른 포맷 조정
+        if self.log_level == 'INFO':
+            # 발표용 간결한 포맷
+            emoji = self.emojis.get(record.levelname, '')
+            prefix = f"{emoji} " if emoji else ""
+            return f"{prefix}{record.getMessage()}"
+        else:
+            # DEBUG 모드 - 상세 정보 포함
+            emoji = self.emojis.get(record.levelname, '')
+            timestamp = self.formatTime(record, '%H:%M:%S')
+            return f"[{timestamp}] [{record.levelname}] {emoji}{record.getMessage()}"
+
 # 로깅 설정
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=level_mapping.get(LOG_LEVEL, logging.INFO),
+    format='%(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
 logger = logging.getLogger(__name__)
+# 커스텀 포맷터 적용
+for handler in logger.handlers:
+    handler.setFormatter(SmartMirrorFormatter())
+
+# 로그 레벨 정보 출력
+logger.info(f"AI 서버 로그 레벨: {LOG_LEVEL}")
 
 app = Flask(__name__)
 CORS(app)
@@ -45,6 +109,20 @@ class IntegratedAIServer:
         # GPU 사용 가능 여부 확인
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"🔧 사용 디바이스: {self.device}")
+        
+        # OpenAI API 설정
+        self.openai_api_key = os.environ.get('OPENAI_API_KEY')
+        self.use_chatgpt = HAS_OPENAI and self.openai_api_key
+        
+        if self.use_chatgpt:
+            openai.api_key = self.openai_api_key
+            logger.info("✅ ChatGPT API 연결 설정 완료")
+        else:
+            if not HAS_OPENAI:
+                logger.warning("⚠️ OpenAI 패키지가 설치되지 않음")
+            if not self.openai_api_key:
+                logger.warning("⚠️ OPENAI_API_KEY 환경변수가 설정되지 않음")
+            logger.info("📝 규칙 기반 응답 시스템 사용")
         
         # 모든 AI 모델 초기화
         self._init_emotion_models()
@@ -568,6 +646,131 @@ class IntegratedAIServer:
         
         return messages.get(weather_category, f"현재 날씨는 {temp_str}입니다.")
 
+    # ========== ChatGPT 기반 자연스러운 응답 생성 ==========
+    
+    def generate_chatgpt_response(self, emotion: str, confidence: float, 
+                                user_text: str = None, analysis_type: str = "emotion") -> str:
+        """
+        ChatGPT API를 사용하여 자연스러운 응답 생성
+        
+        Args:
+            emotion: 분석된 감정 (happy, sad, angry, etc.)
+            confidence: 신뢰도 (0.0 ~ 1.0)
+            user_text: 사용자 발화 내용 (선택)
+            analysis_type: 분석 유형 ("emotion", "outfit", "combined")
+        
+        Returns:
+            자연스러운 응답 메시지
+        """
+        if not self.use_chatgpt:
+            return self.generate_fallback_response(emotion, confidence, analysis_type)
+        
+        try:
+            # 감정별 컨텍스트 설정
+            emotion_context = {
+                'happy': '기쁘고 행복한 상태',
+                'sad': '슬프거나 우울한 상태', 
+                'angry': '화나거나 짜증난 상태',
+                'surprise': '놀라거나 깜짝 놀란 상태',
+                'fear': '불안하거나 두려운 상태',
+                'disgust': '불쾌하거나 싫어하는 상태',
+                'neutral': '평온하고 중립적인 상태'
+            }
+            
+            # 신뢰도에 따른 확신도 표현
+            confidence_level = "매우 확신" if confidence > 0.8 else "어느정도 확신" if confidence > 0.6 else "약간 추측"
+            
+            # 프롬프트 구성
+            system_prompt = """
+            당신은 스마트 미러 AI 어시스턴트입니다. 사용자의 감정을 분석한 후 
+            친근하고 공감적이며 자연스러운 톤으로 대화하세요.
+            
+            응답 규칙:
+            1. 한국어로 대화하세요
+            2. 친근하고 따뜻한 말투를 사용하세요
+            3. 2-3문장 정도로 간결하게 답하세요
+            4. 감정에 맞는 공감과 격려를 해주세요
+            5. 로봇 같지 않고 인간적인 느낌으로 대화하세요
+            """
+            
+            user_prompt = f"""
+            감정 분석 결과:
+            - 감정: {emotion} ({emotion_context.get(emotion, emotion)})
+            - 신뢰도: {confidence:.2f} ({confidence_level}함)
+            """
+            
+            if user_text:
+                user_prompt += f"\n- 사용자 발화: \"{user_text}\""
+            
+            user_prompt += f"\n\n이 상황에서 {emotion_context.get(emotion, emotion)}인 사용자에게 어떻게 말해주면 좋을까요?"
+            
+            # ChatGPT API 호출
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=150,
+                temperature=0.7,
+                timeout=10
+            )
+            
+            chatgpt_response = response.choices[0].message.content.strip()
+            logger.info(f"💬 ChatGPT 응답 생성 완료 ({emotion}, {confidence:.2f})")
+            return chatgpt_response
+            
+        except Exception as e:
+            logger.error(f"ChatGPT 응답 생성 실패: {e}")
+            return self.generate_fallback_response(emotion, confidence, analysis_type)
+    
+    def generate_fallback_response(self, emotion: str, confidence: float, analysis_type: str = "emotion") -> str:
+        """
+        ChatGPT 실패 시 사용할 fallback 응답 (기존 규칙 기반 응답 개선)
+        """
+        # 기존 응답을 더 자연스럽게 개선
+        improved_responses = {
+            'happy': [
+                "와, 정말 좋은 기분이시네요! 오늘 하루도 이렇게 밝게 보내세요.",
+                "행복한 표정이 보기 좋아요! 무슨 좋은 일이 있으셨나봐요?",
+                "기쁜 모습을 보니 저도 덩달아 기분이 좋아져요. 계속 웃어주세요!"
+            ],
+            'sad': [
+                "힘들어 보이시네요. 괜찮으시면 이야기해보세요, 제가 들어드릴게요.",
+                "조금 우울해 보이는데, 이런 날도 있는 거죠. 천천히 기분 풀어가세요.",
+                "마음이 무거우신가 봐요. 잠시 쉬시면서 좋은 생각해보시는 건 어때요?"
+            ],
+            'angry': [
+                "화가 나신 것 같네요. 심호흡 한번 해보시고 마음을 진정시켜보세요.",
+                "스트레스 받는 일이 있으셨나봐요. 잠깐 마음을 가라앉히는 시간을 가져보세요.",
+                "짜증나는 일이 있으셨군요. 조금씩 마음을 풀어보시면 어떨까요?"
+            ],
+            'surprise': [
+                "어머, 깜짝 놀라신 표정이에요! 무슨 일이 있으셨나요?",
+                "정말 놀라신 것 같네요! 좋은 소식이길 바라요.",
+                "표정을 보니 뭔가 예상치 못한 일이 있으셨나봐요!"
+            ],
+            'fear': [
+                "불안해 보이시는데, 괜찮으세요? 천천히 마음을 진정시켜보세요.",
+                "걱정이 있으신 것 같아요. 차근차근 해결해 나가시면 될 거예요.",
+                "조금 두려워 보이시네요. 모든 게 잘 될 거예요, 걱정 마세요."
+            ],
+            'disgust': [
+                "뭔가 불쾌한 일이 있으셨나요? 기분 전환할 시간을 가져보세요.",
+                "싫은 일이 있으셨군요. 잠시 다른 생각으로 마음을 돌려보시는 건 어때요?",
+                "불편하셨나봐요. 좋은 일들로 마음을 채워보세요."
+            ],
+            'neutral': [
+                "평온한 모습이시네요. 차분한 하루 보내고 계시는군요.",
+                "안정적인 상태로 보이세요. 이런 평안함도 좋은 것 같아요.",
+                "차분해 보이시는데, 마음이 편안하신가봐요."
+            ]
+        }
+        
+        responses = improved_responses.get(emotion, improved_responses['neutral'])
+        import random
+        return random.choice(responses)
+
     # ========== 통합 감정 분석 ==========
     
     def combine_emotion_analysis(self, voice_result: Dict[str, Any], 
@@ -594,32 +797,42 @@ class IntegratedAIServer:
                 combined_emotion = voice_emotion
                 combined_confidence = min(0.9, (voice_conf + face_conf) / 2 + 0.2)
                 
-                if combined_emotion == 'sad':
-                    response_message = "목소리 톤과 표정을 보니 조금 우울해 보이시네요. 괜찮으신가요?"
-                elif combined_emotion == 'happy':
-                    response_message = "목소리와 표정 모두 정말 기쁘신 것 같아요! 좋은 일 있으셨나 봐요?"
-                elif combined_emotion == 'angry':
-                    response_message = "목소리와 표정으로 보아 화가 나신 것 같네요. 심호흡 한번 해보시는 건 어떠세요?"
-                else:
-                    response_message = self.emotion_responses[combined_emotion][0]
+                # ChatGPT 기반 응답 생성 (통합 분석)
+                response_message = self.generate_chatgpt_response(
+                    combined_emotion, 
+                    combined_confidence, 
+                    analysis_type="combined"
+                )
             
             elif face_conf > voice_conf + 0.2:
                 # 표정이 더 확실한 경우
                 combined_emotion = face_emotion
                 combined_confidence = face_conf * 0.8
-                response_message = f"표정을 보니 {face_emotion}인 것 같네요. " + self.emotion_responses[face_emotion][0]
+                response_message = self.generate_chatgpt_response(
+                    combined_emotion, 
+                    combined_confidence, 
+                    analysis_type="face"
+                )
             
             elif voice_conf > face_conf + 0.2:
                 # 음성이 더 확실한 경우
                 combined_emotion = voice_emotion
                 combined_confidence = voice_conf * 0.8
-                response_message = f"목소리 톤을 들어보니 {voice_emotion}인 것 같아요. " + self.emotion_responses[voice_emotion][0]
+                response_message = self.generate_chatgpt_response(
+                    combined_emotion, 
+                    combined_confidence, 
+                    analysis_type="voice"
+                )
             
             else:
                 # 불일치하고 신뢰도가 비슷한 경우
                 combined_emotion = face_emotion if face_conf >= voice_conf else voice_emotion
                 combined_confidence = max(face_conf, voice_conf) * 0.6
-                response_message = f"조금 {combined_emotion}해 보이시는데, 확실하지는 않네요. 어떠신가요?"
+                response_message = self.generate_chatgpt_response(
+                    combined_emotion, 
+                    combined_confidence, 
+                    analysis_type="uncertain"
+                )
             
             return {
                 'success': True,
@@ -831,13 +1044,21 @@ def health_check():
 
 if __name__ == '__main__':
     try:
-        logger.info("🚀 통합 AI 분석 서버 시작...")
+        # 환경 변수 설정
+        import os
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # 자동 설정
+        
+        # 포트 설정
+        port = int(os.environ.get('AI_SERVER_PORT', 5052))
+        host = os.environ.get('AI_SERVER_HOST', '0.0.0.0')
+        
+        logger.info(f"🚀 통합 AI 분석 서버 시작... ({host}:{port})")
         get_ai_server()  # 모델 로딩
         
         # Flask 서버 실행
         app.run(
-            host='0.0.0.0',
-            port=5052,
+            host=host,
+            port=port,
             debug=False,
             threaded=True
         )
