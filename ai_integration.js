@@ -6,6 +6,7 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const axios = require('axios');
 const { log } = require('./js/logging');
+const { processRecognizedCommand } = require('./js/conversation');
 
 // AI 서버 설정
 const AI_SERVER_HOST = process.env.AI_SERVER_HOST || '192.168.0.162';
