@@ -508,13 +508,13 @@ class ConversationAITrigger {
       surprise: /놀라|깜짝|헉|와|대박|어머|진짜\?/i,  // "어?" 제거
       fear: /무서|걱정|불안|두려|떨려|긴장|심장이|걱정돼/i,
       neutral: /보통|그냥|평상시|평범/i,  // "어" 제거 (너무 광범위함)
-      // 감정/표정 관련 직접 질문들만
-      general: /기분.*어때|어떤.*기분|표정.*어때|내.*어때|나.*어떻게.*보여|어떻게.*보이|감정.*어때|마음.*어때/i
+      // 감정/표정 관련 직접 질문들만 (옷차림 제외)
+      general: /기분.*어때|어떤.*기분|표정.*어때|나.*기분.*어때|나.*감정.*어때|나.*어떻게.*보여|어떻게.*보이|감정.*어때|마음.*어때/i
     };
     
     // 외모/옷차림 관련 키워드 패턴
-    // 옷차림 관련 키워드 (더 구체적으로 수정)
-    this.outfitKeywords = /오늘.*복장.*어때|오늘.*옷.*어때|내.*옷.*어때|어울리|옷차림|스타일|패션|입고.*어때|복장.*어때|멋있|예쁘|잘.*어울|옷.*괜찮|옷.*좋|옷.*어울/i;
+    // 옷차림 관련 키워드 (더 포괄적으로 수정)
+    this.outfitKeywords = /오늘.*복장.*어때|오늘.*옷.*어때|내.*복장.*어때|내.*옷.*어때|어울리|옷차림|스타일|패션|입고.*어때|복장.*어때|멋있|예쁘|잘.*어울|옷.*괜찮|옷.*좋|옷.*어울|코디|룩|의상/i;
   }
 
   /**
@@ -772,17 +772,17 @@ async function enhanceConversationWithAI(recognizedText, dependencies) {
       return null;
     }
     
-    // 1. 감정 표현 감지
-    const detectedEmotion = conversationTrigger.detectEmotionExpression(recognizedText);
-    if (detectedEmotion) {
-      log.info(`😊 감정 표현 감지: ${detectedEmotion}`);
-      return await conversationTrigger.executeEmotionAnalysisWorkflow(recognizedText, detectedEmotion);
+    // 1. 옷차림 질문 감지 (더 구체적이므로 먼저 체크)
+    if (conversationTrigger.isOutfitQuestion(recognizedText)) {
+      log.info('� 옷차림 질문 감지');
+      return await conversationTrigger.executeOutfitAnalysisWorkflow();
     }
     
-    // 2. 옷차림 질문 감지
-    if (conversationTrigger.isOutfitQuestion(recognizedText)) {
-      log.info('👔 옷차림 질문 감지');
-      return await conversationTrigger.executeOutfitAnalysisWorkflow();
+    // 2. 감정 표현 감지 (옷차림이 아닌 경우만)
+    const detectedEmotion = conversationTrigger.detectEmotionExpression(recognizedText);
+    if (detectedEmotion) {
+      log.info(`� 감정 표현 감지: ${detectedEmotion}`);
+      return await conversationTrigger.executeEmotionAnalysisWorkflow(recognizedText, detectedEmotion);
     }
     
     return null; // AI 트리거되지 않음 - 기존 대화 시스템 사용
