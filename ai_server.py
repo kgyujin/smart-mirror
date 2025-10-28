@@ -34,6 +34,8 @@ except ImportError:
     HAS_OPENAI = False
     openai_version = None
 import asyncio
+import requests
+from datetime import datetime
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -102,6 +104,86 @@ logger.info(f"AI 서버 로그 레벨: {LOG_LEVEL}")
 app = Flask(__name__)
 CORS(app)
 
+class WeatherService:
+    """OpenWeather API를 사용한 날씨 정보 서비스"""
+    
+    def __init__(self, api_key=None):
+        self.api_key = api_key or os.environ.get('OPENWEATHER_API_KEY')
+        self.base_url = "http://api.openweathermap.org/data/2.5/weather"
+        self.enabled = bool(self.api_key)
+        
+        if not self.enabled:
+            logger.warning("OpenWeather API 키가 설정되지 않음. 기본 날씨값 사용")
+        else:
+            logger.info("OpenWeather API 연동 활성화")
+    
+    def get_weather_data(self, city="Seoul", country_code="KR"):
+        """
+        현재 날씨 정보 가져오기
+        
+        Args:
+            city: 도시명 (기본값: Seoul)
+            country_code: 국가 코드 (기본값: KR)
+            
+        Returns:
+            dict: 날씨 정보 또는 기본값
+        """
+        if not self.enabled:
+            return self._get_default_weather()
+        
+        try:
+            params = {
+                'q': f"{city},{country_code}",
+                'appid': self.api_key,
+                'units': 'metric',  # 섭씨 온도
+                'lang': 'kr'       # 한국어 설명
+            }
+            
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            weather_data = response.json()
+            
+            # 응답 데이터 파싱
+            result = {
+                'temperature': round(weather_data['main']['temp']),
+                'temp': round(weather_data['main']['temp']),
+                'feels_like': round(weather_data['main']['feels_like']),
+                'humidity': weather_data['main']['humidity'],
+                'condition': weather_data['weather'][0]['main'].lower(),
+                'description': weather_data['weather'][0]['description'],
+                'city': weather_data['name'],
+                'country': weather_data['sys']['country'],
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            logger.info(f"날씨 정보 수신 완료: {result['city']} {result['temp']}°C ({result['description']})")
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"OpenWeather API 요청 실패: {e}")
+            return self._get_default_weather()
+        except KeyError as e:
+            logger.error(f"날씨 데이터 파싱 실패: {e}")
+            return self._get_default_weather()
+        except Exception as e:
+            logger.error(f"예상치 못한 날씨 API 오류: {e}")
+            return self._get_default_weather()
+    
+    def _get_default_weather(self):
+        """API 실패 시 기본 날씨 정보"""
+        return {
+            'temperature': 20,
+            'temp': 20,
+            'feels_like': 20,
+            'humidity': 50,
+            'condition': 'clear',
+            'description': '맑음',
+            'city': 'Seoul',
+            'country': 'KR',
+            'timestamp': datetime.now().isoformat()
+        }
+
 class IntegratedAIServer:
     def __init__(self):
         """통합 AI 분석 서버 초기화"""
@@ -135,6 +217,9 @@ class IntegratedAIServer:
             if not self.openai_api_key:
                 logger.warning("OPENAI_API_KEY 환경변수가 설정되지 않음. setup_openai.sh 참고")
             logger.info("규칙 기반 응답 시스템 사용")
+        
+        # 날씨 서비스 초기화
+        self.weather_service = WeatherService()
         
         # 모든 AI 모델 초기화
         self._init_emotion_models()
@@ -574,11 +659,20 @@ class IntegratedAIServer:
         prompts = outfit_prompts.get(weather_category, outfit_prompts['mild'])
         return prompts['appropriate'], prompts['inappropriate']
     
-    def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-            temp = weather_data.get('temp', 20)
+            # 날씨 정보가 없으면 API에서 가져오기
+            if not weather_data:
+                weather_data = self.weather_service.get_weather_data()
+                logger.info("AI 서버에서 직접 날씨 정보 획득")
+            
+            temp = weather_data.get('temp') or weather_data.get('temperature', 20)
+            condition = weather_data.get('condition', 'clear')
+            description = weather_data.get('description', '맑음')
+            
             weather_category = self.get_weather_category(temp)
+            logger.debug(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")
             
             appropriate_prompts, inappropriate_prompts = self.get_outfit_prompts(weather_category)
             
@@ -995,22 +1089,26 @@ def analyze_face_emotion():
 
 @app.route('/analyze/outfit', methods=['POST'])
 def analyze_outfit():
-    """👔 옷차림 적절성 분석 API"""
+    """👔 옷차림 적절성 분석 API (OpenWeather API 연동)"""
     try:
         data = request.get_json()
         
-        if 'photo' not in data or 'weather' not in data:
-            return jsonify({'success': False, 'error': 'Missing photo or weather data'}), 400
+        if 'photo' not in data:
+            return jsonify({'success': False, 'error': 'Missing photo data'}), 400
         
         server = get_ai_server()
         
         # Base64 이미지를 OpenCV 이미지로 변환
         image = server.base64_to_image(data['photo'])
         
-        # 옷차림 분석
-        result = server.analyze_outfit_appropriateness(image, data['weather'])
+        # 날씨 정보 처리 (선택적)
+        weather_data = data.get('weather')  # 클라이언트에서 제공한 날씨 정보 (선택)
         
-        logger.info(f"👔 옷차림 분석 완료: {'적절' if result.get('is_appropriate') else '부적절'}")
+        # 옷차림 분석 (날씨 정보는 AI 서버에서 자동 획득)
+        result = server.analyze_outfit_appropriateness(image, weather_data)
+        
+        logger.info(f"옷차림 분석 완료: {'적절' if result.get('is_appropriate') else '부적절'} "
+                   f"(온도: {result.get('temperature', 'N/A')}°C)")
         
         return jsonify(sanitize_for_json(result))
         

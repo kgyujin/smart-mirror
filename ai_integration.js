@@ -439,17 +439,24 @@ class AIServerClient {
   }
 
   /**
-   * 옷차림 분석 요청
+   * 옷차림 분석 요청 (AI 서버에서 자동으로 날씨 정보 획득)
    * @param {string} base64Photo - Base64 이미지 데이터
-   * @param {object} weatherData - 날씨 정보 {temp: number, condition: string}
+   * @param {object} weatherData - 선택적 날씨 정보 (없으면 AI 서버에서 자동 획득)
    * @returns {Promise<object>} 옷차림 분석 결과
    */
-  async analyzeOutfit(base64Photo, weatherData) {
+  async analyzeOutfit(base64Photo, weatherData = null) {
     try {
-      const response = await axios.post(`${this.serverUrl}/analyze/outfit`, {
-        photo: base64Photo,
-        weather: weatherData
-      }, {
+      const requestData = { photo: base64Photo };
+      
+      // 날씨 정보가 있으면 추가 (선택적)
+      if (weatherData) {
+        requestData.weather = weatherData;
+        log.debug('클라이언트 날씨 정보와 함께 옷차림 분석 요청');
+      } else {
+        log.debug('AI 서버에서 자동으로 날씨 정보 획득하여 옷차림 분석');
+      }
+      
+      const response = await axios.post(`${this.serverUrl}/analyze/outfit`, requestData, {
         timeout: 30000,
         headers: { 'Content-Type': 'application/json' }
       });
