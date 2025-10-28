@@ -181,7 +181,10 @@ class WeatherService:
         Returns:
             dict: 날씨 정보 또는 기본값
         """
+        logger.info(f"🌤️ WeatherService.get_weather_data() 호출됨 - enabled: {self.enabled}")
+        
         if not self.enabled:
+            logger.warning("API 키가 없어서 기본 날씨 사용")
             return self._get_default_weather()
         
         try:
@@ -192,22 +195,25 @@ class WeatherService:
                 'lang': 'kr'       # 한국어 설명
             }
             
-            logger.info(f"🌤️  OpenWeather API 호출 중: {city}, {country_code}")
-            logger.debug(f"API URL: {self.base_url}")
-            logger.debug(f"API 키: {'*' * (len(self.api_key)-4)}{self.api_key[-4:]}")
+            logger.info(f"🌤️  OpenWeather API 호출 시작: {city}, {country_code}")
+            logger.info(f"API URL: {self.base_url}")
+            logger.info(f"API 키 확인: {'*' * (len(self.api_key)-4)}{self.api_key[-4:] if self.api_key else 'None'}")
             
             response = requests.get(self.base_url, params=params, timeout=10)
-            logger.info(f"API 응답 상태: {response.status_code}")
+            logger.info(f"📡 API 응답 상태: {response.status_code}")
             
-            response.raise_for_status()
+            if response.status_code != 200:
+                logger.error(f"❌ API 응답 오류: {response.status_code} - {response.text}")
+                return self._get_default_weather()
             
             weather_data = response.json()
-            logger.debug(f"API 응답 데이터: {weather_data}")
+            logger.info(f"📊 API 원본 응답 데이터: {weather_data}")
             
             # 응답 데이터 파싱
+            actual_temp = weather_data['main']['temp']
             result = {
-                'temperature': round(weather_data['main']['temp']),
-                'temp': round(weather_data['main']['temp']),
+                'temperature': round(actual_temp),
+                'temp': round(actual_temp),
                 'feels_like': round(weather_data['main']['feels_like']),
                 'humidity': weather_data['main']['humidity'],
                 'condition': weather_data['weather'][0]['main'].lower(),
@@ -217,7 +223,8 @@ class WeatherService:
                 'timestamp': datetime.now().isoformat()
             }
             
-            logger.info(f"날씨 정보 수신 완료: {result['city']} {result['temp']}°C ({result['description']})")
+            logger.info(f"✅ 날씨 정보 파싱 완료: {result['city']} {result['temp']}°C ({result['description']})")
+            logger.info(f"🌡️ 원본 온도: {actual_temp}, 반올림 온도: {result['temp']}")
             return result
             
         except requests.exceptions.RequestException as e:
@@ -235,7 +242,8 @@ class WeatherService:
     
     def _get_default_weather(self):
         """API 실패 시 기본 날씨 정보"""
-        return {
+        logger.warning("🔄 _get_default_weather() 호출됨 - 기본값 13도 사용")
+        default_weather = {
             'temperature': 13,
             'temp': 13,
             'feels_like': 13,
@@ -246,6 +254,8 @@ class WeatherService:
             'country': 'KR',
             'timestamp': datetime.now().isoformat()
         }
+        logger.info(f"기본 날씨 데이터 반환: {default_weather}")
+        return default_weather
 
 class IntegratedAIServer:
     def __init__(self):
@@ -743,18 +753,28 @@ class IntegratedAIServer:
     def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-            # 날씨 정보가 없으면 API에서 가져오기
-            if not weather_data:
-                weather_data = self.weather_service.get_weather_data()
-                logger.info(f"AI 서버에서 직접 날씨 정보 획득: {weather_data}")
+            # 🔥 항상 AI 서버에서 직접 날씨 API 호출 (라즈베리파이 데이터 무시)
+            logger.info("🌤️ 강제로 AI 서버에서 실제 날씨 API 호출 시작...")
+            weather_data = self.weather_service.get_weather_data()
+            logger.info(f"🌡️ AI 서버 직접 날씨 정보 획득: {weather_data}")
             
-            # 온도 정보 추출 (API 실패 시 기본값은 13도)
-            temp = weather_data.get('temp') or weather_data.get('temperature', 13)
+            # 그래도 온도 정보가 없다면 재시도
+            if weather_data is None or not weather_data.get('temp'):
+                logger.warning("⚠️ 여전히 날씨 데이터가 없음. 한 번 더 시도...")
+                weather_data = self.weather_service.get_weather_data()
+                logger.info(f"재시도 날씨 데이터: {weather_data}")
+            
+            temp = weather_data.get('temp') or weather_data.get('temperature')
+            if temp is None:
+                logger.error("날씨 API에서 온도 정보를 가져올 수 없음!")
+                temp = 13  # 최후의 기본값
+            
             condition = weather_data.get('condition', 'clear')
             description = weather_data.get('description', '맑음')
             
             # 디버깅: 실제 날씨 데이터 확인
-            logger.debug(f"날씨 데이터 디버깅: temp={temp}, weather_data={weather_data}")
+            logger.info(f"🌡️ 날씨 데이터 디버깅: temp={temp}, condition={condition}, description={description}")
+            logger.info(f"전체 weather_data: {weather_data}")
             
             weather_category = self.get_weather_category(temp)
             logger.info(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")
@@ -1285,9 +1305,9 @@ def analyze_emotion_legacy():
         logger.debug(f"요청 데이터 키: {list(data.keys())}")
         server = get_ai_server()
         
-        # 음성 데이터 확인
-        if 'audio_data' in data or 'audio' in data:
-            audio_data = data.get('audio_data') or data.get('audio')
+        # 음성 데이터 확인 (라즈베리파이 호환성 추가)
+        if 'audio_data' in data or 'audio' in data or 'audio_base64' in data:
+            audio_data = data.get('audio_data') or data.get('audio') or data.get('audio_base64')
             
             # 이미지 데이터도 있는지 확인
             if 'image_data' in data or 'images' in data:

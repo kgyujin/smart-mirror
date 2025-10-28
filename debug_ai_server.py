@@ -5,36 +5,48 @@ import requests
 import json
 import base64
 
-def test_weather_and_outfit():
-    """날씨 정보와 옷차림 분석 테스트"""
+def test_weather_api():
+    """날씨 API 테스트"""
+    print("\n=== 날씨 API 테스트 ===")
     
-    # 더미 이미지 (1x1 투명 PNG)
-    dummy_image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77yQAAAABJRU5ErkJggg=="
+    # 더미 이미지 데이터
+    dummy_image_base64 = generate_dummy_image()
     
-    server_url = "http://localhost:5052"
+    # 1. 날씨 데이터 없이 테스트 (AI 서버가 자체적으로 API 호출)
+    test_data = {
+        'photo': dummy_image_base64
+    }
     
-    print("🧪 옷차림 분석 API 테스트 (날씨 자동 획득)")
     try:
-        response = requests.post(
-            f"{server_url}/analyze/outfit",
-            json={'photo': dummy_image},
-            timeout=30
-        )
-        
+        print("🔍 AI 서버 자체 날씨 API 호출 테스트...")
+        response = requests.post(f"{BASE_URL}/analyze/outfit", json=test_data, timeout=30)
         print(f"응답 상태: {response.status_code}")
+        
         if response.status_code == 200:
             result = response.json()
             print("✅ 옷차림 분석 성공!")
-            print(f"   온도: {result.get('temperature')}°C")
-            print(f"   날씨 카테고리: {result.get('weather_category')}")
-            print(f"   적절성: {result.get('is_appropriate')}")
-            print(f"   응답: {result.get('response_message')}")
+            print(f"   실제 온도: {result.get('temperature', 'N/A')}°C")
+            print(f"   날씨 카테고리: {result.get('weather_category', 'N/A')}")
+            print(f"   날씨 상태: {result.get('condition', 'N/A')}")
+            print(f"   적절성: {'적절' if result.get('is_appropriate') else '부적절'}")
+            print(f"   신뢰도: {result.get('confidence', 0):.2f}")
+            print(f"   응답 메시지: {result.get('response_message', 'N/A')}")
+            
+            # 온도가 20도인지 확인
+            temp = result.get('temperature')
+            if temp == 20:
+                print("⚠️  경고: 온도가 20도로 출력됨 (기본값일 가능성)")
+            else:
+                print(f"✅ 실제 온도가 반영됨: {temp}°C")
+            
+            return True
         else:
-            print(f"❌ 요청 실패: {response.status_code}")
-            print(f"   응답: {response.text}")
+            print(f"❌ 옷차림 분석 실패: {response.text}")
+            return False
             
     except Exception as e:
-        print(f"❌ 테스트 실패: {e}")
+        print(f"❌ 날씨 API 테스트 오류: {e}")
+        return False
 
 def test_emotion_api():
     """감정 분석 API 테스트"""
