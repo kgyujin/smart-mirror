@@ -61,12 +61,21 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 try:
     import openai
-    # OpenAI 라이브러리 버전 확인
-    openai_version = getattr(openai, '__version__', 'unknown')
+    # OpenAI 라이브러리 버전 확인 (다양한 방법으로 시도)
+    try:
+        openai_version = openai.__version__
+    except AttributeError:
+        try:
+            import pkg_resources
+            openai_version = pkg_resources.get_distribution("openai").version
+        except:
+            openai_version = "unknown"
     HAS_OPENAI = True
+    print(f"🔍 OpenAI 패키지 로드 성공: v{openai_version}")
 except ImportError:
     HAS_OPENAI = False
     openai_version = None
+    print("⚠️  OpenAI 패키지가 설치되지 않음")
 import asyncio
 import requests
 from datetime import datetime
@@ -244,15 +253,28 @@ class IntegratedAIServer:
         
         if self.use_chatgpt:
             try:
-                # OpenAI 클라이언트 초기화 (v1.0+ 방식)
-                if openai_version and openai_version >= '1.0.0':
+                # OpenAI 클라이언트 초기화 (안전한 방식)
+                print(f"🔍 OpenAI 버전: {openai_version}")
+                
+                # 다양한 초기화 방식 시도
+                try:
+                    # 최신 방식 (v1.0+)
                     self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
-                else:
-                    # 구버전 방식
-                    openai.api_key = self.openai_api_key
-                    self.openai_client = None
-                    
-                logger.info(f"ChatGPT API 연결 설정 완료 (OpenAI v{openai_version})")
+                    logger.info(f"ChatGPT API 연결 설정 완료 (OpenAI v{openai_version}, 신규 방식)")
+                except TypeError as te:
+                    # proxies 인수 오류 등 처리
+                    logger.warning(f"신규 방식 실패, 기본 방식 시도: {te}")
+                    try:
+                        # 기본 인수만 사용
+                        import openai as openai_module
+                        self.openai_client = openai_module.OpenAI(api_key=self.openai_api_key)
+                        logger.info(f"ChatGPT API 연결 설정 완료 (OpenAI v{openai_version}, 기본 방식)")
+                    except Exception:
+                        # 구버전 방식 폴백
+                        openai.api_key = self.openai_api_key
+                        self.openai_client = None
+                        logger.info(f"ChatGPT API 연결 설정 완료 (OpenAI v{openai_version}, 구버전 방식)")
+                        
             except Exception as e:
                 logger.error(f"ChatGPT API 초기화 실패: {e}")
                 self.use_chatgpt = False
@@ -856,31 +878,37 @@ class IntegratedAIServer:
             
             user_prompt += f"\n\n이 상황에서 {emotion_context.get(emotion, emotion)}인 사용자에게 어떻게 말해주면 좋을까요?"
             
-            # ChatGPT API 호출 (버전별 호환성)
+            # ChatGPT API 호출 (안전한 버전별 호환성)
             if self.openai_client:
-                # OpenAI v1.0+ 방식
-                response = self.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    max_tokens=150,
-                    temperature=0.7,
-                    timeout=10
-                )
+                try:
+                    # OpenAI v1.0+ 방식 (timeout 제거하여 안전성 확보)
+                    response = self.openai_client.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        max_tokens=150,
+                        temperature=0.7
+                    )
+                except Exception as api_error:
+                    logger.warning(f"OpenAI API 호출 실패, 폴백 사용: {api_error}")
+                    return self.generate_fallback_response(emotion, confidence, analysis_type)
             else:
-                # 구버전 방식
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    max_tokens=150,
-                    temperature=0.7,
-                    timeout=10
-                )
+                try:
+                    # 구버전 방식 (timeout 제거하여 안전성 확보)
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        max_tokens=150,
+                        temperature=0.7
+                    )
+                except Exception as api_error:
+                    logger.warning(f"OpenAI 구버전 API 호출 실패, 폴백 사용: {api_error}")
+                    return self.generate_fallback_response(emotion, confidence, analysis_type)
             
             # 응답 추출 (버전별 호환성)
             if hasattr(response.choices[0], 'message'):
