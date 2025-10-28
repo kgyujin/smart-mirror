@@ -622,8 +622,8 @@ class ConversationAITrigger {
         } catch (error) {
           log.warn('날씨 정보 획득 실패, 기본값 사용:', error.message);
           weatherData = { 
-            temperature: 20, 
-            temp: 20, 
+            temperature: 13, 
+            temp: 13, 
             condition: 'unknown',
             current: { temperature: 20 }
           };

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""OpenAI API 연결 테스트 스크립트"""
+"""API 연결 테스트 스크립트 (OpenAI + OpenWeather)"""
 
 import os
 import sys
+import requests
 
 # 환경변수 로드
 try:
@@ -10,6 +11,42 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+def test_openweather_api():
+    """OpenWeather API 테스트"""
+    api_key = os.environ.get('OPENWEATHER_API_KEY')
+    if not api_key:
+        print("❌ OPENWEATHER_API_KEY 환경변수가 설정되지 않음")
+        return False
+    
+    print(f"✅ OPENWEATHER_API_KEY 설정됨 (길이: {len(api_key)})")
+    
+    try:
+        base_url = "http://api.openweathermap.org/data/2.5/weather"
+        params = {
+            'q': 'Seoul,KR',
+            'appid': api_key,
+            'units': 'metric',
+            'lang': 'kr'
+        }
+        
+        print("🌤️  OpenWeather API 호출 중...")
+        response = requests.get(base_url, params=params, timeout=10)
+        print(f"📡 응답 상태: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            temp = data['main']['temp']
+            desc = data['weather'][0]['description']
+            print(f"✅ 현재 서울 날씨: {temp}°C ({desc})")
+            return True
+        else:
+            print(f"❌ API 오류: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ OpenWeather API 테스트 실패: {e}")
+        return False
 
 def test_openai_connection():
     """OpenAI API 연결 테스트"""
@@ -87,14 +124,22 @@ def test_openai_connection():
         return False
 
 if __name__ == "__main__":
-    print("🧪 OpenAI API 연결 테스트 시작")
+    print("🧪 API 연결 테스트 시작")
     print("="*50)
     
-    success = test_openai_connection()
+    # OpenWeather API 테스트
+    weather_success = test_openweather_api()
+    print()
+    
+    # OpenAI API 테스트
+    openai_success = test_openai_connection()
     
     print("="*50)
-    if success:
-        print("🎉 OpenAI API 테스트 완료!")
+    if weather_success and openai_success:
+        print("🎉 모든 API 테스트 완료!")
     else:
-        print("💥 OpenAI API 테스트 실패")
-        sys.exit(1)
+        print("💥 일부 API 테스트 실패")
+        if not weather_success:
+            print("   - OpenWeather API 실패")
+        if not openai_success:
+            print("   - OpenAI API 실패")

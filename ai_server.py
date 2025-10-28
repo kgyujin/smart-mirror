@@ -161,6 +161,10 @@ class WeatherService:
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
         self.enabled = bool(self.api_key)
         
+        print(f"🔧 WeatherService 초기화:")
+        print(f"   API 키 설정됨: {'예' if self.api_key else '아니오'}")
+        print(f"   서비스 활성화: {'예' if self.enabled else '아니오'}")
+        
         if not self.enabled:
             logger.warning("OpenWeather API 키가 설정되지 않음. 기본 날씨값 사용")
         else:
@@ -188,10 +192,17 @@ class WeatherService:
                 'lang': 'kr'       # 한국어 설명
             }
             
+            logger.info(f"🌤️  OpenWeather API 호출 중: {city}, {country_code}")
+            logger.debug(f"API URL: {self.base_url}")
+            logger.debug(f"API 키: {'*' * (len(self.api_key)-4)}{self.api_key[-4:]}")
+            
             response = requests.get(self.base_url, params=params, timeout=10)
+            logger.info(f"API 응답 상태: {response.status_code}")
+            
             response.raise_for_status()
             
             weather_data = response.json()
+            logger.debug(f"API 응답 데이터: {weather_data}")
             
             # 응답 데이터 파싱
             result = {
@@ -210,21 +221,24 @@ class WeatherService:
             return result
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"OpenWeather API 요청 실패: {e}")
+            logger.error(f"❌ OpenWeather API 요청 실패: {e}")
+            logger.warning("🔄 기본 날씨 정보 사용")
             return self._get_default_weather()
         except KeyError as e:
-            logger.error(f"날씨 데이터 파싱 실패: {e}")
+            logger.error(f"❌ 날씨 데이터 파싱 실패: {e}")
+            logger.warning("🔄 기본 날씨 정보 사용")
             return self._get_default_weather()
         except Exception as e:
-            logger.error(f"예상치 못한 날씨 API 오류: {e}")
+            logger.error(f"❌ 예상치 못한 날씨 API 오류: {e}")
+            logger.warning("🔄 기본 날씨 정보 사용")
             return self._get_default_weather()
     
     def _get_default_weather(self):
         """API 실패 시 기본 날씨 정보"""
         return {
-            'temperature': 20,
-            'temp': 20,
-            'feels_like': 20,
+            'temperature': 13,
+            'temp': 13,
+            'feels_like': 13,
             'humidity': 50,
             'condition': 'clear',
             'description': '맑음',
