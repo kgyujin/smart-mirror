@@ -603,14 +603,23 @@ class ConversationAITrigger {
     try {
       log.info('👔 옷차림 분석 워크플로우 시작');
       
-      // 1. 날씨 정보 확보
+      // 1. 날씨 정보 확보 (라즈베리파이에서 가져오기)
       if (!weatherData) {
-        // 현재 날씨 정보 가져오기
         try {
-          weatherData = await fetchWeatherData(false);
+          if (fetchWeatherData) {
+            weatherData = await fetchWeatherData(false);
+            log.debug('라즈베리파이에서 날씨 정보 획득:', weatherData);
+          } else {
+            throw new Error('날씨 모듈이 로드되지 않음');
+          }
         } catch (error) {
-          log.warn('날씨 정보 획득 실패:', error);
-          weatherData = { temp: 20, condition: 'unknown' }; // 기본값
+          log.warn('날씨 정보 획득 실패, 기본값 사용:', error.message);
+          weatherData = { 
+            temperature: 20, 
+            temp: 20, 
+            condition: 'unknown',
+            current: { temperature: 20 }
+          };
         }
       }
       
@@ -618,10 +627,14 @@ class ConversationAITrigger {
       const photo = await this.imageCapture.captureOutfitPhoto();
       
       // 3. AI 서버로 분석 요청
-      const result = await this.aiClient.analyzeOutfit(photo, {
-        temp: weatherData.temp || weatherData.temperature || 20,
-        condition: weatherData.condition || 'unknown'
-      });
+      const weatherInfo = {
+        temp: weatherData.temp || weatherData.temperature || weatherData.current?.temperature || 20,
+        condition: weatherData.condition || weatherData.current?.condition || 'unknown',
+        description: weatherData.description || weatherData.current?.description || ''
+      };
+      
+      log.debug('옷차림 분석용 날씨 정보:', weatherInfo);
+      const result = await this.aiClient.analyzeOutfit(photo, weatherInfo);
       
       if (result.success) {
         log.info(`👔 옷차림 분석 완료: ${result.is_appropriate ? '적절' : '부적절'}`);

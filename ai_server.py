@@ -27,11 +27,12 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 try:
     import openai
+    # OpenAI 라이브러리 버전 확인
+    openai_version = getattr(openai, '__version__', 'unknown')
     HAS_OPENAI = True
 except ImportError:
     HAS_OPENAI = False
-    logger = logging.getLogger(__name__)
-    logger.warning("OpenAI 라이브러리가 설치되지 않음. ChatGPT 기능을 사용하려면 'pip install openai'를 실행하세요.")
+    openai_version = None
 import asyncio
 
 # 경고 메시지 숨기기
@@ -115,14 +116,25 @@ class IntegratedAIServer:
         self.use_chatgpt = HAS_OPENAI and self.openai_api_key
         
         if self.use_chatgpt:
-            openai.api_key = self.openai_api_key
-            logger.info("✅ ChatGPT API 연결 설정 완료")
+            try:
+                # OpenAI 클라이언트 초기화 (v1.0+ 방식)
+                if openai_version and openai_version >= '1.0.0':
+                    self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
+                else:
+                    # 구버전 방식
+                    openai.api_key = self.openai_api_key
+                    self.openai_client = None
+                    
+                logger.info(f"ChatGPT API 연결 설정 완료 (OpenAI v{openai_version})")
+            except Exception as e:
+                logger.error(f"ChatGPT API 초기화 실패: {e}")
+                self.use_chatgpt = False
         else:
             if not HAS_OPENAI:
-                logger.warning("⚠️ OpenAI 패키지가 설치되지 않음")
+                logger.warning("OpenAI 패키지가 설치되지 않음. 설치: pip install openai")
             if not self.openai_api_key:
-                logger.warning("⚠️ OPENAI_API_KEY 환경변수가 설정되지 않음")
-            logger.info("📝 규칙 기반 응답 시스템 사용")
+                logger.warning("OPENAI_API_KEY 환경변수가 설정되지 않음. setup_openai.sh 참고")
+            logger.info("규칙 기반 응답 시스템 사용")
         
         # 모든 AI 모델 초기화
         self._init_emotion_models()
@@ -704,20 +716,39 @@ class IntegratedAIServer:
             
             user_prompt += f"\n\n이 상황에서 {emotion_context.get(emotion, emotion)}인 사용자에게 어떻게 말해주면 좋을까요?"
             
-            # ChatGPT API 호출
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=150,
-                temperature=0.7,
-                timeout=10
-            )
+            # ChatGPT API 호출 (버전별 호환성)
+            if self.openai_client:
+                # OpenAI v1.0+ 방식
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=150,
+                    temperature=0.7,
+                    timeout=10
+                )
+            else:
+                # 구버전 방식
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=150,
+                    temperature=0.7,
+                    timeout=10
+                )
             
-            chatgpt_response = response.choices[0].message.content.strip()
-            logger.info(f"💬 ChatGPT 응답 생성 완료 ({emotion}, {confidence:.2f})")
+            # 응답 추출 (버전별 호환성)
+            if hasattr(response.choices[0], 'message'):
+                chatgpt_response = response.choices[0].message.content.strip()
+            else:
+                chatgpt_response = response.choices[0]['message']['content'].strip()
+                
+            logger.info(f"ChatGPT 응답 생성 완료 ({emotion}, {confidence:.2f})")
             return chatgpt_response
             
         except Exception as e:
