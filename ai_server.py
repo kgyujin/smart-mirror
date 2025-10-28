@@ -151,24 +151,32 @@ class WeatherService:
     """OpenWeather API를 사용한 날씨 정보 서비스"""
     
     def __init__(self, api_key=None):
-        # 환경변수 디버깅
+        # 환경변수 상세 디버깅
+        print("🔍🔍🔍 WeatherService 초기화 시작...")
         openweather_key = os.environ.get('OPENWEATHER_API_KEY')
-        print(f"🔍 OPENWEATHER_API_KEY 환경변수: {'있음' if openweather_key else '없음'}")
+        print(f"� OPENWEATHER_API_KEY 환경변수: {'✅있음' if openweather_key else '❌없음'}")
         if openweather_key:
-            print(f"   키 길이: {len(openweather_key)}, 끝 4자리: {openweather_key[-4:]}")
+            print(f"   📏 키 길이: {len(openweather_key)}자")
+            print(f"   🔤 시작 8자: {openweather_key[:8]}...")
+            print(f"   🔤 끝 8자: ...{openweather_key[-8:]}")
+        else:
+            print("   ❌ API 키가 환경변수에서 로드되지 않음!")
         
         self.api_key = api_key or openweather_key
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
         self.enabled = bool(self.api_key)
         
-        print(f"🔧 WeatherService 초기화:")
-        print(f"   API 키 설정됨: {'예' if self.api_key else '아니오'}")
-        print(f"   서비스 활성화: {'예' if self.enabled else '아니오'}")
+        print(f"🔧 WeatherService 최종 설정:")
+        print(f"   🔑 API 키 최종 설정됨: {'✅예' if self.api_key else '❌아니오'}")
+        print(f"   🌐 서비스 활성화 상태: {'✅예' if self.enabled else '❌아니오'}")
+        print(f"   🌍 API URL: {self.base_url}")
         
         if not self.enabled:
+            print("⚠️⚠️⚠️ API 키가 없어서 기본 날씨값(13도) 사용!")
             logger.warning("OpenWeather API 키가 설정되지 않음. 기본 날씨값 사용")
         else:
-            logger.info(f"OpenWeather API 연동 활성화: {'*' * (len(self.api_key)-4)}{self.api_key[-4:]}")
+            print(f"✅✅✅ OpenWeather API 준비 완료!")
+            logger.info(f"OpenWeather API 연동 활성화: {'*' * max(1, len(self.api_key)-8)}{self.api_key[-4:]}")
     
     def get_weather_data(self, city="Seoul", country_code="KR"):
         """
@@ -753,16 +761,27 @@ class IntegratedAIServer:
     def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-            # 🔥 항상 AI 서버에서 직접 날씨 API 호출 (라즈베리파이 데이터 무시)
-            logger.info("🌤️ 강제로 AI 서버에서 실제 날씨 API 호출 시작...")
-            weather_data = self.weather_service.get_weather_data()
-            logger.info(f"🌡️ AI 서버 직접 날씨 정보 획득: {weather_data}")
+            # 🔥🔥🔥 무조건 라즈베리파이 데이터 무시하고 맥북에서 실제 API 호출
+            logger.warning("🚫🚫🚫 입력된 weather_data 완전 무시! (라즈베리파이 20도 데이터 차단)")
+            logger.info("🌤️ 맥북 WeatherService에서 실제 OpenWeather API 직접 호출 시작")
             
-            # 그래도 온도 정보가 없다면 재시도
-            if weather_data is None or not weather_data.get('temp'):
-                logger.warning("⚠️ 여전히 날씨 데이터가 없음. 한 번 더 시도...")
-                weather_data = self.weather_service.get_weather_data()
-                logger.info(f"재시도 날씨 데이터: {weather_data}")
+            # weather_data 파라미터를 완전히 무시하고 새로 호출
+            fresh_weather_data = self.weather_service.get_weather_data()
+            logger.info(f"🌡️ 신규 API 호출 결과: {fresh_weather_data}")
+            
+            # 결과 검증
+            if fresh_weather_data and fresh_weather_data.get('temp'):
+                weather_data = fresh_weather_data  # 새로운 데이터 사용
+                logger.info(f"✅ 실제 온도 획득 성공: {weather_data['temp']}°C")
+            else:
+                logger.error("❌ API 호출 실패, 한 번 더 시도...")
+                retry_weather_data = self.weather_service.get_weather_data() 
+                if retry_weather_data and retry_weather_data.get('temp'):
+                    weather_data = retry_weather_data
+                    logger.info(f"🔄 재시도 성공: {weather_data['temp']}°C")
+                else:
+                    logger.error("💥 모든 API 호출 실패! 기본값 사용")
+                    weather_data = self.weather_service._get_default_weather()
             
             temp = weather_data.get('temp') or weather_data.get('temperature')
             if temp is None:
@@ -1213,11 +1232,11 @@ def analyze_outfit():
         # Base64 이미지를 OpenCV 이미지로 변환
         image = server.base64_to_image(data['photo'])
         
-        # 날씨 정보 처리 (선택적)
-        weather_data = data.get('weather')  # 클라이언트에서 제공한 날씨 정보 (선택)
+        # 🔥 라즈베리파이 날씨 데이터 완전 무시 - 항상 맥북에서 실제 API 호출
+        logger.info("🌤️ 라즈베리파이 날씨 데이터 무시, 맥북에서 실제 OpenWeather API 호출")
         
-        # 옷차림 분석 (날씨 정보는 AI 서버에서 자동 획득)
-        result = server.analyze_outfit_appropriateness(image, weather_data)
+        # 옷차림 분석 (weather_data=None으로 강제 설정하여 API 호출 보장)
+        result = server.analyze_outfit_appropriateness(image, weather_data=None)
         
         temp_display = result.get('temperature')
         temp_str = f"{temp_display}°C" if temp_display is not None else "N/A°C"

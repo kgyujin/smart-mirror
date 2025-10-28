@@ -500,18 +500,21 @@ class ConversationAITrigger {
     this.imageCapture = imageCapture;
     this.aiClient = aiClient;
     
-    // 감정 관련 키워드 패턴
+    // 감정 관련 키워드 패턴 (확장됨)
     this.emotionKeywords = {
-      sad: /기분.*안.*좋|슬프|우울|힘들|스트레스|걱정|속상/i,
-      happy: /기쁘|신나|좋|행복|즐거|기분.*좋|만족/i,
-      angry: /화.*나|짜증|빡치|열받|분노/i,
-      surprise: /놀라|깜짝|헉|와|대박/i,
-      fear: /무서|걱정|불안|두려/i,
-      neutral: /보통|그냥|평상시/i
+      sad: /기분.*안.*좋|슬프|우울|힘들|스트레스|걱정|속상|우울해|피곤|지쳐/i,
+      happy: /기쁘|신나|좋|행복|즐거|기분.*좋|만족|기분.*좋아|신나|재미있|웃겨/i,
+      angry: /화.*나|짜증|빡치|열받|분노|성가셔|귀찮|짜증나/i,
+      surprise: /놀라|깜짝|헉|와|대박|어머|어?|진짜?/i,
+      fear: /무서|걱정|불안|두려|떨려|긴장|심장이|걱정돼/i,
+      neutral: /보통|그냥|평상시|평범|그런데|음|어/i,
+      // 감정/표정 관련 직접 질문들
+      general: /기분.*어때|어떤.*기분|표정.*어때|내.*어때|나.*어떻게.*보여|어떻게.*보이|감정.*어때|마음.*어때/i
     };
     
     // 외모/옷차림 관련 키워드 패턴
-    this.outfitKeywords = /오늘.*어때|내.*옷.*어때|어울리|옷차림|스타일|패션|입고.*어때|나.*어때|멋있|예쁘|잘.*어울/i;
+    // 옷차림 관련 키워드 (더 구체적으로 수정)
+    this.outfitKeywords = /오늘.*복장.*어때|오늘.*옷.*어때|내.*옷.*어때|어울리|옷차림|스타일|패션|입고.*어때|복장.*어때|멋있|예쁘|잘.*어울|옷.*괜찮|옷.*좋|옷.*어울/i;
   }
 
   /**
@@ -534,6 +537,15 @@ class ConversationAITrigger {
    * @returns {boolean} 옷차림 관련 질문 여부
    */
   isOutfitQuestion(userText) {
+    // 먼저 제외할 키워드들을 체크 (일정, 날씨, 뉴스 등)
+    const excludeKeywords = /일정|날씨|뉴스|시간|약속|스케줄|캘린더|할.*일|계획|미팅|회의|업무/i;
+    
+    // 제외 키워드가 포함된 경우 옷차림 질문이 아님
+    if (excludeKeywords.test(userText)) {
+      return false;
+    }
+    
+    // 옷차림 키워드가 포함된 경우만 true
     return this.outfitKeywords.test(userText);
   }
 
