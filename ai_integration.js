@@ -500,15 +500,15 @@ class ConversationAITrigger {
     this.imageCapture = imageCapture;
     this.aiClient = aiClient;
     
-    // 감정 관련 키워드 패턴 (확장됨)
+    // 감정 관련 키워드 패턴 (더 정확하게 수정)
     this.emotionKeywords = {
       sad: /기분.*안.*좋|슬프|우울|힘들|스트레스|걱정|속상|우울해|피곤|지쳐/i,
       happy: /기쁘|신나|좋|행복|즐거|기분.*좋|만족|기분.*좋아|신나|재미있|웃겨/i,
       angry: /화.*나|짜증|빡치|열받|분노|성가셔|귀찮|짜증나/i,
-      surprise: /놀라|깜짝|헉|와|대박|어머|어?|진짜?/i,
+      surprise: /놀라|깜짝|헉|와|대박|어머|진짜\?/i,  // "어?" 제거
       fear: /무서|걱정|불안|두려|떨려|긴장|심장이|걱정돼/i,
-      neutral: /보통|그냥|평상시|평범|그런데|음|어/i,
-      // 감정/표정 관련 직접 질문들
+      neutral: /보통|그냥|평상시|평범/i,  // "어" 제거 (너무 광범위함)
+      // 감정/표정 관련 직접 질문들만
       general: /기분.*어때|어떤.*기분|표정.*어때|내.*어때|나.*어떻게.*보여|어떻게.*보이|감정.*어때|마음.*어때/i
     };
     
@@ -523,6 +523,15 @@ class ConversationAITrigger {
    * @returns {string|null} 감지된 감정 또는 null
    */
   detectEmotionExpression(userText) {
+    // 기능적 질문들은 감정 분석에서 제외 (일정, 날씨, 뉴스 등)
+    const functionalKeywords = /일정|날씨|뉴스|시간|약속|스케줄|캘린더|할.*일|계획|미팅|회의|업무|알려줘|들려줘|보여줘|말해줘|확인|체크/i;
+    
+    // 기능적 질문인 경우 감정 분석 안 함
+    if (functionalKeywords.test(userText)) {
+      return null;
+    }
+    
+    // 감정 표현이 포함된 경우만 감정 분석
     for (const [emotion, pattern] of Object.entries(this.emotionKeywords)) {
       if (pattern.test(userText)) {
         return emotion;
