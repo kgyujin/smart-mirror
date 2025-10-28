@@ -662,17 +662,18 @@ class IntegratedAIServer:
     def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-        # 날씨 정보가 없으면 API에서 가져오기
-        if not weather_data:
-            weather_data = self.weather_service.get_weather_data()
-            logger.info(f"AI 서버에서 직접 날씨 정보 획득: {weather_data}")
-        
-        temp = weather_data.get('temp') or weather_data.get('temperature', 20)
-        condition = weather_data.get('condition', 'clear')
-        description = weather_data.get('description', '맑음')
-        
-        weather_category = self.get_weather_category(temp)
-        logger.info(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")            appropriate_prompts, inappropriate_prompts = self.get_outfit_prompts(weather_category)
+            # 날씨 정보가 없으면 API에서 가져오기
+            if not weather_data:
+                weather_data = self.weather_service.get_weather_data()
+                logger.info(f"AI 서버에서 직접 날씨 정보 획득: {weather_data}")
+            
+            temp = weather_data.get('temp') or weather_data.get('temperature', 20)
+            condition = weather_data.get('condition', 'clear')
+            description = weather_data.get('description', '맑음')
+            
+            weather_category = self.get_weather_category(temp)
+            logger.info(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")
+            appropriate_prompts, inappropriate_prompts = self.get_outfit_prompts(weather_category)
             
             # OpenCV 이미지를 PIL로 변환
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
