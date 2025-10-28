@@ -115,7 +115,7 @@ class WeatherService:
         if not self.enabled:
             logger.warning("OpenWeather API 키가 설정되지 않음. 기본 날씨값 사용")
         else:
-            logger.info("OpenWeather API 연동 활성화")
+            logger.info(f"OpenWeather API 연동 활성화: {'*' * (len(self.api_key)-4)}{self.api_key[-4:]}")
     
     def get_weather_data(self, city="Seoul", country_code="KR"):
         """
@@ -662,19 +662,17 @@ class IntegratedAIServer:
     def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-            # 날씨 정보가 없으면 API에서 가져오기
-            if not weather_data:
-                weather_data = self.weather_service.get_weather_data()
-                logger.info("AI 서버에서 직접 날씨 정보 획득")
-            
-            temp = weather_data.get('temp') or weather_data.get('temperature', 20)
-            condition = weather_data.get('condition', 'clear')
-            description = weather_data.get('description', '맑음')
-            
-            weather_category = self.get_weather_category(temp)
-            logger.debug(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")
-            
-            appropriate_prompts, inappropriate_prompts = self.get_outfit_prompts(weather_category)
+        # 날씨 정보가 없으면 API에서 가져오기
+        if not weather_data:
+            weather_data = self.weather_service.get_weather_data()
+            logger.info(f"AI 서버에서 직접 날씨 정보 획득: {weather_data}")
+        
+        temp = weather_data.get('temp') or weather_data.get('temperature', 20)
+        condition = weather_data.get('condition', 'clear')
+        description = weather_data.get('description', '맑음')
+        
+        weather_category = self.get_weather_category(temp)
+        logger.info(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")            appropriate_prompts, inappropriate_prompts = self.get_outfit_prompts(weather_category)
             
             # OpenCV 이미지를 PIL로 변환
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -714,6 +712,8 @@ class IntegratedAIServer:
                 'is_appropriate': is_appropriate,
                 'confidence': confidence,
                 'weather_category': weather_category,
+                'temperature': temp,
+                'condition': weather_data.get('condition', ''),
                 'appropriate_score': max_appropriate,
                 'inappropriate_score': max_inappropriate,
                 'response_message': response_message
@@ -1107,8 +1107,10 @@ def analyze_outfit():
         # 옷차림 분석 (날씨 정보는 AI 서버에서 자동 획득)
         result = server.analyze_outfit_appropriateness(image, weather_data)
         
+        temp_display = result.get('temperature')
+        temp_str = f"{temp_display}°C" if temp_display is not None else "N/A°C"
         logger.info(f"옷차림 분석 완료: {'적절' if result.get('is_appropriate') else '부적절'} "
-                   f"(온도: {result.get('temperature', 'N/A')}°C)")
+                   f"(온도: {temp_str})")
         
         return jsonify(sanitize_for_json(result))
         
@@ -1168,6 +1170,60 @@ def health_check():
         'models_loaded': ai_server is not None,
         'services': ['voice_emotion', 'face_emotion', 'outfit', 'combined_emotion']
     })
+
+# ========== 기존 API 호환성 엔드포인트 ==========
+
+@app.route('/analyze_emotion', methods=['POST'])
+def analyze_emotion_legacy():
+    """🔄 기존 호환성: 감정 분석 API (음성 + 표정 통합)"""
+    try:
+        data = request.get_json()
+        server = get_ai_server()
+        
+        # 음성 데이터 확인
+        if 'audio_data' in data or 'audio' in data:
+            audio_data = data.get('audio_data') or data.get('audio')
+            
+            # 이미지 데이터도 있는지 확인
+            if 'image_data' in data or 'images' in data:
+                # 통합 분석
+                image_data = data.get('image_data') or data.get('images')
+                if isinstance(image_data, str):
+                    image_data = [image_data]  # 단일 이미지를 리스트로 변환
+                
+                # 통합 감정 분석 호출
+                voice_result = server.analyze_voice_emotion_simple(
+                    server.extract_audio_features(*server.base64_to_audio(audio_data))
+                )
+                
+                images = [server.base64_to_image(img) for img in image_data]
+                face_result = server.analyze_multiple_face_emotions(images)
+                
+                combined_result = server.combine_emotion_analysis(voice_result, face_result)
+                
+                logger.info(f"통합 감정 분석 완료: {combined_result.get('combined_emotion', 'unknown')}")
+                return jsonify(sanitize_for_json(combined_result))
+            
+            else:
+                # 음성만 분석
+                y, sr = server.base64_to_audio(audio_data)
+                features = server.extract_audio_features(y, sr)
+                result = server.analyze_voice_emotion_simple(features)
+                
+                logger.info(f"음성 감정 분석 완료: {result.get('emotion', 'unknown')}")
+                return jsonify(sanitize_for_json(result))
+        
+        else:
+            return jsonify({'success': False, 'error': 'Missing audio data'}), 400
+            
+    except Exception as e:
+        logger.error(f"기존 감정 분석 API 오류: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'emotion': 'neutral',
+            'confidence': 0.0
+        }), 500
 
 # ========== 서버 실행 ==========
 
