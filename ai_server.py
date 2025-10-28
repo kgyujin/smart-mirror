@@ -748,9 +748,13 @@ class IntegratedAIServer:
                 weather_data = self.weather_service.get_weather_data()
                 logger.info(f"AI 서버에서 직접 날씨 정보 획득: {weather_data}")
             
-            temp = weather_data.get('temp') or weather_data.get('temperature', 20)
+            # 온도 정보 추출 (API 실패 시 기본값은 13도)
+            temp = weather_data.get('temp') or weather_data.get('temperature', 13)
             condition = weather_data.get('condition', 'clear')
             description = weather_data.get('description', '맑음')
+            
+            # 디버깅: 실제 날씨 데이터 확인
+            logger.debug(f"날씨 데이터 디버깅: temp={temp}, weather_data={weather_data}")
             
             weather_category = self.get_weather_category(temp)
             logger.info(f"옷차림 분석용 날씨: {temp}°C, {description} (카테고리: {weather_category})")
@@ -1265,7 +1269,20 @@ def health_check():
 def analyze_emotion_legacy():
     """🔄 기존 호환성: 감정 분석 API (음성 + 표정 통합)"""
     try:
+        logger.info("🔍 /analyze_emotion 엔드포인트 호출됨")
+        
+        # 요청 데이터 확인
         data = request.get_json()
+        if not data:
+            logger.error("❌ 요청 데이터가 비어있음")
+            return jsonify({
+                'success': False, 
+                'error': 'No JSON data provided',
+                'emotion': 'neutral',
+                'confidence': 0.0
+            }), 400
+        
+        logger.debug(f"요청 데이터 키: {list(data.keys())}")
         server = get_ai_server()
         
         # 음성 데이터 확인
@@ -1302,7 +1319,14 @@ def analyze_emotion_legacy():
                 return jsonify(sanitize_for_json(result))
         
         else:
-            return jsonify({'success': False, 'error': 'Missing audio data'}), 400
+            logger.error("❌ 오디오 데이터가 없음")
+            logger.error(f"사용 가능한 키: {list(data.keys())}")
+            return jsonify({
+                'success': False, 
+                'error': 'Missing audio data (audio_data or audio key required)',
+                'emotion': 'neutral',
+                'confidence': 0.0
+            }), 400
             
     except Exception as e:
         logger.error(f"기존 감정 분석 API 오류: {e}")
