@@ -17,6 +17,40 @@ import warnings
 from typing import List, Dict, Any, Tuple, Optional
 from collections import Counter
 
+# 환경변수 로드
+def load_env_file():
+    """환경변수 파일 로드 (dotenv 없이도 동작)"""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        print("✅ .env 파일 로드 성공 (python-dotenv)")
+        return True
+    except ImportError:
+        # python-dotenv가 없으면 직접 파싱
+        try:
+            env_path = os.path.join(os.path.dirname(__file__), '.env')
+            if os.path.exists(env_path):
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            os.environ[key.strip()] = value.strip()
+                print("✅ .env 파일 로드 성공 (직접 파싱)")
+                return True
+            else:
+                print("⚠️  .env 파일을 찾을 수 없습니다")
+                return False
+        except Exception as e:
+            print(f"⚠️  .env 파일 로드 실패: {e}")
+            return False
+    except Exception as e:
+        print(f"⚠️  .env 파일 로드 실패: {e}")
+        return False
+
+# 환경변수 로드 실행
+load_env_file()
+
 import cv2
 import torch
 import numpy as np
@@ -108,7 +142,13 @@ class WeatherService:
     """OpenWeather API를 사용한 날씨 정보 서비스"""
     
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get('OPENWEATHER_API_KEY')
+        # 환경변수 디버깅
+        openweather_key = os.environ.get('OPENWEATHER_API_KEY')
+        print(f"🔍 OPENWEATHER_API_KEY 환경변수: {'있음' if openweather_key else '없음'}")
+        if openweather_key:
+            print(f"   키 길이: {len(openweather_key)}, 끝 4자리: {openweather_key[-4:]}")
+        
+        self.api_key = api_key or openweather_key
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
         self.enabled = bool(self.api_key)
         
@@ -194,7 +234,12 @@ class IntegratedAIServer:
         logger.info(f"🔧 사용 디바이스: {self.device}")
         
         # OpenAI API 설정
-        self.openai_api_key = os.environ.get('OPENAI_API_KEY')
+        openai_key = os.environ.get('OPENAI_API_KEY')
+        print(f"🔍 OPENAI_API_KEY 환경변수: {'있음' if openai_key else '없음'}")
+        if openai_key:
+            print(f"   키 길이: {len(openai_key)}, 시작: {openai_key[:7]}...")
+        
+        self.openai_api_key = openai_key
         self.use_chatgpt = HAS_OPENAI and self.openai_api_key
         
         if self.use_chatgpt:
