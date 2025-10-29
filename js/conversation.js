@@ -525,14 +525,24 @@ const handleWeatherCommand = async (command, dependencies, emotion) => {
   try {
     log.info('날씨 명령 처리:', command);
     
-    // 기존 날씨 데이터 가져오기
-    if (dependencies.fetchWeatherData) {
-      const weatherData = await dependencies.fetchWeatherData();
+    // dependencies 확인
+    if (!dependencies || !dependencies.fetchWeatherData) {
+      log.error('날씨 dependencies가 없음:', dependencies ? Object.keys(dependencies) : 'null');
+      throw new Error('날씨 의존성 없음');
+    }
+    
+    log.info('날씨 데이터 가져오기 시도...');
+    const weatherData = await dependencies.fetchWeatherData();
+    log.info('날씨 API 응답 받음:', weatherData ? '데이터 있음' : '데이터 없음');
+    
+    if (weatherData) {
+      log.debug('날씨 데이터 구조:', JSON.stringify(weatherData, null, 2));
       
-      if (weatherData && weatherData.current) {
-        const temp = Math.round(weatherData.current.temp);
-        const description = weatherData.current.description || '맑음';
-        const humidity = weatherData.current.humidity;
+      // OpenWeather API 구조에 맞게 수정
+      if (weatherData.main || weatherData.current) {
+        const temp = Math.round(weatherData.main?.temp || weatherData.current?.temp || 0);
+        const description = weatherData.weather?.[0]?.description || weatherData.current?.description || '맑음';
+        const humidity = weatherData.main?.humidity || weatherData.current?.humidity;
         
         let emotionPrefix = '';
         if (emotion.emotion === 'sad') {

@@ -263,12 +263,26 @@ const environmentalAwareness = {
 
 // 안정적인 날씨 API 호출 함수
 const fetchWeatherData = async (useCache = true) => {
+  // API 설정 확인
+  if (!WEATHER_API_KEY) {
+    log.error('날씨 API 키가 설정되지 않음 (.env 파일의 WEATHER_API_KEY 확인 필요)');
+    throw new Error('날씨 API 키 없음');
+  }
+  if (!CITY_ID) {
+    log.error('도시 ID가 설정되지 않음 (.env 파일의 CITY_ID 확인 필요)');
+    throw new Error('도시 ID 없음');
+  }
+  
+  log.debug(`날씨 API 설정: 도시=${CITY_ID}, API키=${WEATHER_API_KEY.slice(-4)}`);
+  
   // 캐시된 데이터가 있고 30분 이내라면 캐시 사용
   if (useCache && weatherCache.data && Date.now() - weatherCache.ts < 30 * 60 * 1000) {
+    log.debug('캐시된 날씨 데이터 사용');
     return { ...weatherCache.data, _cached: true };
   }
   
   const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
+  log.debug(`날씨 API URL: ${url.replace(WEATHER_API_KEY, '***')}`);
   
   // 최대 3번 재시도
   for (let attempt = 1; attempt <= 3; attempt++) {
