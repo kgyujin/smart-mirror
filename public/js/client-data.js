@@ -76,7 +76,8 @@ async function loadCalendar() {
     renderCalendar(events);
     
     // 상세 로그 출력 (실시간 추적용)
-    console.log(`📅 캘린더 폴링 업데이트: ${count}개 일정 ${lastUpdated ? `(서버: ${new Date(lastUpdated).toLocaleTimeString()})` : ''} → 클라이언트: ${new Date().toLocaleTimeString()}`);
+    console.log(`캘린더 폴링 업데이트: ${count}개 일정 ${lastUpdated ? `(서버: ${new Date(lastUpdated).toLocaleTimeString()})` : ''} - 클라이언트: ${new Date().toLocaleTimeString()}`);
+    renderCalendar(data.events);
     
     // 성공 시 시각적 피드백 (아주 미묘한)
     const calendarHeader = document.querySelector('#calendar h2');

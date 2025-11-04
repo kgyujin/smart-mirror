@@ -49,15 +49,15 @@ function initWS() {
           if (last) setTimeout(() => { last.style.opacity = '0'; setTimeout(() => last.remove(), 400); }, delay);
         }
       } else if (msg.type === 'calendar_update') {
-        // 🚀 캘린더 실시간 업데이트 처리
-        console.log(`📅 실시간 캘린더 업데이트 수신! (변경 #${msg.updateCount || '?'}) - ${msg.reason || 'unknown'}`);
+        // 캘린더 실시간 업데이트 처리
+        console.log(`실시간 캘린더 업데이트 수신! (변경 #${msg.updateCount || '?'}) - ${msg.reason || 'unknown'}`);
         
         if (msg.events) {
           renderCalendar(msg.events);
-          console.log(`📅 ${msg.events.length}개 일정으로 즉시 업데이트됨 (${new Date(msg.timestamp).toLocaleTimeString()})`);
+          console.log(`${msg.events.length}개 일정으로 즉시 업데이트됨 (${new Date(msg.timestamp).toLocaleTimeString()})`);
         } else {
           // 서버에서 변경 알림만 받은 경우 다시 로드
-          console.log('📅 캘린더 변경 알림 → 데이터 다시 로드');
+          console.log('캘린더 변경 알림 - 데이터 다시 로드');
           if (typeof loadCalendar === 'function') {
             loadCalendar();
           }
@@ -77,11 +77,11 @@ function initWS() {
         $('advice').textContent = msg.message || '';
       } else if (msg.type === 'request_face_capture') {
         // 표정 분석 요청 - Raspberry Pi가 이미지를 보내면 서버로 전달
-        console.log('📸 표정 분석 요청 받음');
+        console.log('표정 분석 요청 받음');
         addCaption('assistant', '표정을 분석 중입니다...', { autohideMs: 3000 });
       } else if (msg.type === 'request_outfit_capture') {
         // 옷차림 분석 요청
-        console.log('👔 옷차림 분석 요청 받음');
+        console.log('옷차림 분석 요청 받음');
         addCaption('assistant', '옷차림을 확인 중입니다...', { autohideMs: 3000 });
       } else if (msg.type === 'face_emotion_result') {
         // 표정 분석 결과 표시

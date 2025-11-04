@@ -2,11 +2,8 @@ const axios = require('axios');
 const { WEATHER_API_KEY, CITY_ID } = require('./config');
 const { log } = require('./logging');
 
-// In-memory weather cache for outage/timeout fallback
 let weatherCache = { data: null, ts: 0 };
 
-// ========== 날짜 인지 및 시간 처리 시스템 ==========
-// KST 기준 시간 유틸리티
 const getKSTNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
 
 const formatKSTTime = () => {
@@ -280,7 +277,7 @@ const fetchWeatherData = async (useCache = true) => {
     log.debug('캐시된 날씨 데이터 사용');
     return { ...weatherCache.data, _cached: true };
   }
-  
+
   const url = `https://api.openweathermap.org/data/2.5/weather?id=${CITY_ID}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
   log.debug(`날씨 API URL: ${url.replace(WEATHER_API_KEY, '***')}`);
   

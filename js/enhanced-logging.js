@@ -1,40 +1,34 @@
-// ========== 개선된 로깅 시스템 ==========
-// Winston 기반 로그 레벨 관리
-
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 
-// 로그 레벨 설정 (환경변수로 제어)
 const LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
 const ENABLE_FILE_LOGGING = process.env.ENABLE_FILE_LOGGING === 'true';
 
-// 로그 디렉토리 생성
 const logDir = path.join(__dirname, '..', 'logs');
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
 
-// 커스텀 로그 포맷
 const customFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.printf(({ level, message, timestamp, stack }) => {
-    // 이모지 매핑 (INFO 레벨에서만 핵심 이모지 사용)
-    const emojis = {
-      error: '❌',
-      warn: '⚠️',
-      info: '',      // INFO는 이모지 제거하여 깔끔하게
-      debug: '🔍'
+    // 레벨 접두사 매핑
+    const prefixes = {
+      error: '[ERROR]',
+      warn: '[WARN]',
+      info: '',      // INFO는 접두사 제거하여 깔끔하게
+      debug: '[DEBUG]'
     };
     
-    const emoji = emojis[level] || '';
-    const prefix = emoji ? `${emoji} ` : '';
+    const prefix = prefixes[level] || '';
+    const prefixStr = prefix ? `${prefix} ` : '';
     
     if (stack) {
-      return `[${timestamp}] [${level.toUpperCase()}] ${prefix}${message}\n${stack}`;
+      return `[${timestamp}] [${level.toUpperCase()}] ${prefixStr}${message}\n${stack}`;
     }
-    return `[${timestamp}] [${level.toUpperCase()}] ${prefix}${message}`;
+    return `[${timestamp}] [${level.toUpperCase()}] ${prefixStr}${message}`;
   })
 );
 
@@ -46,11 +40,11 @@ const consoleFormat = winston.format.combine(
     if (LOG_LEVEL === 'INFO') {
       // 핵심 메시지만 간결하게 표시
       if (level.includes('error')) {
-        return `❌ ${message}`;
+        return `[ERROR] ${message}`;
       } else if (level.includes('warn')) {
-        return `⚠️ ${message}`;
+        return `[WARN] ${message}`;
       } else if (level.includes('info')) {
-        return message; // 이모지 없이 깔끔하게
+        return message; // 접두사 없이 깔끔하게
       }
       return message;
     } else {
@@ -119,9 +113,6 @@ const enhancedLog = {
     logger.debug(fullMessage);
   },
   
-  // 새로운 메서드들
-  
-  // 사용자 명령 인식 (발표용 핵심 로그)
   userCommand: (command, result = null) => {
     if (result) {
       logger.info(`사용자 명령: "${command}" → ${result}`);
@@ -130,7 +121,6 @@ const enhancedLog = {
     }
   },
   
-  // AI 분석 결과 (발표용 핵심 로그)
   aiResult: (type, emotion, confidence, additionalInfo = '') => {
     const confPercentage = Math.round(confidence * 100);
     const info = additionalInfo ? ` (${additionalInfo})` : '';

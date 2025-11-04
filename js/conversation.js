@@ -1,8 +1,6 @@
 const axios = require('axios');
 const { log } = require('./logging');
 
-// ========== 감정 분석 시스템 ==========
-
 const analyzeEmotion = (text) => {
   const lowerText = text.toLowerCase();
   
@@ -82,14 +80,10 @@ const combineEmotions = (textEmotion, audioEmotion) => {
   };
 };
 
-// ========== 대화 처리 시스템 ==========
-
 const processUserInput = async (input, emotionData, openaiClient) => {
   try {
-    // 입력 텍스트 감정 분석
     const textEmotion = analyzeEmotion(input);
     
-    // 음성과 텍스트 감정 분석 결과 합치기
     const combinedEmotionData = {
       emotion: emotionData.emotion,
       probability: {
@@ -158,16 +152,13 @@ const processUserInput = async (input, emotionData, openaiClient) => {
   }
 };
 
-// ========== 대화 문맥 관리 시스템 ==========
-
 class ConversationContext {
   constructor() {
     this.contexts = new Map();
     this.maxContextLength = 10;
-    this.sessionTimeout = 1000 * 60 * 30; // 30분 세션 타임아웃
+    this.sessionTimeout = 1000 * 60 * 30;
   }
 
-  // 새로운 컨텍스트 생성 또는 기존 컨텍스트 가져오기
   getOrCreateContext(userId) {
     if (!this.contexts.has(userId)) {
       this.contexts.set(userId, {
@@ -262,9 +253,6 @@ const EmotionManager = {
   }
 };
 
-// ========== 명령 처리 시스템 ==========
-
-// 표정 분석 처리
 const handleFaceEmotionCommand = async (command, dependencies, emotionData) => {
   try {
     log.info('표정 분석 요청 시작');
@@ -482,18 +470,13 @@ const processRecognizedCommand = async (command, dependencies, emotionData = nul
   }
 };
 
-// ========== 기능별 핸들러 함수들 ==========
-
-// 뉴스 명령 처리
 const handleNewsCommand = async (command, dependencies, emotion) => {
   try {
     log.info('뉴스 명령 처리:', command);
     
-    // 기존 뉴스 처리 함수 사용
     if (dependencies && dependencies.processNewsQuery) {
       const newsResult = await dependencies.processNewsQuery(command);
       
-      // 감정에 따른 뉴스 소개 문구 추가
       let emotionPrefix = '';
       if (emotion.emotion === 'sad') {
         emotionPrefix = '기분이 좋지 않으신 것 같아요. 희망적인 소식들을 위주로 알려드릴게요. ';

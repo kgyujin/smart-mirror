@@ -48,11 +48,6 @@ CAPTION_HIDE_AFTER_TTS_MS=3000
 
 # 상시 듣기 모드
 ALWAYS_LISTEN=true
-
-# 음성인식 품질 개선 설정 (선택사항)
-AUDIO_CHUNK_SIZE=20        # 오디오 청크 크기 (약 1초)
-MIN_TEXT_LENGTH=2          # 최소 텍스트 길이
-MAX_CONSECUTIVE_EMPTY=10   # 최대 연속 빈 결과
 ```
 
 **중요**: `.env` 파일은 반드시 프로젝트 루트 디렉토리에 있어야 하며, 파일명 앞에 점(.)이 있어야 합니다.
@@ -145,15 +140,8 @@ npm start
 3. 서버 재시작
 
 ### 음성인식 품질이 낮은 경우
-1. `AUDIO_CHUNK_SIZE` 값을 조정 (기본값: 20)
-2. `MIN_TEXT_LENGTH` 값을 증가 (기본값: 2)
-3. `MAX_CONSECUTIVE_EMPTY` 값을 조정 (기본값: 10)
-4. 마이크 위치 및 환경 소음 확인
-
-### ETRI API 429 에러 (동시 요청 제한)
-1. 음성인식 간격을 늘리기 위해 `AUDIO_CHUNK_SIZE` 증가
-2. 불필요한 음성 인식 결과 필터링 강화
-3. API 호출 빈도 조절
+1. 마이크 위치 및 환경 소음 확인
+2. 오디오 입력 레벨 조정
 
 ## 라이선스
 

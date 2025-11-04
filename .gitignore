@@ -8,7 +8,10 @@ env/
 venv/
 ENV/
 emotion_env/
+emotion_env310/
 emotion_env_backup/
+ai_env/
+vision_env/
 build/
 develop-eggs/
 dist/

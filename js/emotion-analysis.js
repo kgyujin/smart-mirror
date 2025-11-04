@@ -34,13 +34,13 @@ class EmotionAnalysisClient {
       this.lastHealthCheck = now;
       
       if (this.isConnected) {
-        log.info(`✅ 감정 분석 서버 연결됨 (디바이스: ${response.data.device})`);
+        log.info(`감정 분석 서버 연결됨 (디바이스: ${response.data.device})`);
       }
       
       return this.isConnected;
     } catch (error) {
       this.isConnected = false;
-      log.warn('⚠️ 감정 분석 서버 연결 실패:', error.message);
+      log.warn('감정 분석 서버 연결 실패:', error.message);
       return false;
     }
   }
@@ -65,7 +65,7 @@ class EmotionAnalysisClient {
       // 오디오 버퍼를 base64로 인코딩
       const audioBase64 = audioBuffer.toString('base64');
       
-      log.info('🔍 맥북 서버로 감정 분석 요청 중...');
+      log.info('맥북 서버로 감정 분석 요청 중...');
       const startTime = Date.now();
       
       const response = await axios.post(`${this.serverUrl}/analyze_emotion`, {
@@ -82,8 +82,8 @@ class EmotionAnalysisClient {
       if (response.data.success) {
         const { emotion, confidence, response: emotionResponse, emotion_scores, processing_time } = response.data;
         
-        log.info(`🎯 감정 분석 완료: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%)`);
-        log.info(`⏱️ 총 처리 시간: ${processingTime}ms (서버: ${(processing_time * 1000).toFixed(0)}ms)`);
+        log.info(`감정 분석 완료: ${emotion} (신뢰도: ${(confidence * 100).toFixed(1)}%)`);
+        log.info(`총 처리 시간: ${processingTime}ms (서버: ${(processing_time * 1000).toFixed(0)}ms)`);
         
         return {
           emotion,
@@ -100,11 +100,11 @@ class EmotionAnalysisClient {
       
     } catch (error) {
       if (error.code === 'ECONNREFUSED') {
-        log.warn('🔌 맥북 감정 분석 서버에 연결할 수 없습니다.');
+        log.warn('맥북 감정 분석 서버에 연결할 수 없습니다.');
       } else if (error.code === 'ETIMEDOUT') {
-        log.warn('⏰ 감정 분석 서버 응답 시간 초과');
+        log.warn('감정 분석 서버 응답 시간 초과');
       } else {
-        log.error('❌ 감정 분석 오류:', error.message);
+        log.error('감정 분석 오류:', error.message);
       }
       return null;
     }
@@ -159,7 +159,7 @@ class EmotionAnalysisClient {
       });
     }
 
-    log.info(`💬 감정 기반 응답: ${response}`);
+    log.info(`감정 기반 응답: ${response}`);
     return response;
   }
 

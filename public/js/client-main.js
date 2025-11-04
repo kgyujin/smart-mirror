@@ -18,7 +18,7 @@ loadPersonalizedMessage(); // 개인화된 메시지 로드
 setInterval(loadNews, 1000 * 60 * 1);           // 1분마다 뉴스 업데이트
 setInterval(loadSummary, 1000 * 60 * 1);        // 1분마다 요약 업데이트
 setInterval(loadWeather, 1000 * 60 * 1);        // 1분마다 날씨 업데이트
-setInterval(loadCalendar, 1000 * 30);           // 🚀 30초마다 캘린더 업데이트 (초고빈도!)
+setInterval(loadCalendar, 1000 * 30);           // 30초마다 캘린더 업데이트 (초고빈도!)
 setInterval(loadPersonalizedMessage, 1000 * 60 * 1); // 1분마다 개인화 메시지 업데이트
 initWS();
 

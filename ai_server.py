@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-통합 AI 분석 서버 - 스마트 미러용
-- 음성 감정 분석 (librosa + 딥러닝)
-- 얼굴 표정 분석 (trpakov/vit-face-expression)
-- 옷차림 적절성 분석 (OpenAI CLIP)
+스마트 미러 AI 분석 서버
+음성 감정 분석, 얼굴 표정 분석, 옷차림 적절성 분석 제공
 """
 
 import os
@@ -17,16 +15,14 @@ import warnings
 from typing import List, Dict, Any, Tuple, Optional
 from collections import Counter
 
-# 환경변수 로드
 def load_env_file():
-    """환경변수 파일 로드 (dotenv 없이도 동작)"""
+    """환경변수 파일 로드"""
     try:
         from dotenv import load_dotenv
         load_dotenv()
-        print("✅ .env 파일 로드 성공 (python-dotenv)")
+        print(".env 파일 로드 성공 (python-dotenv)")
         return True
     except ImportError:
-        # python-dotenv가 없으면 직접 파싱
         try:
             env_path = os.path.join(os.path.dirname(__file__), '.env')
             if os.path.exists(env_path):
@@ -36,19 +32,18 @@ def load_env_file():
                         if line and not line.startswith('#') and '=' in line:
                             key, value = line.split('=', 1)
                             os.environ[key.strip()] = value.strip()
-                print("✅ .env 파일 로드 성공 (직접 파싱)")
+                print(".env 파일 로드 성공 (직접 파싱)")
                 return True
             else:
-                print("⚠️  .env 파일을 찾을 수 없습니다")
+                print(".env 파일을 찾을 수 없습니다")
                 return False
         except Exception as e:
-            print(f"⚠️  .env 파일 로드 실패: {e}")
+            print(f".env 파일 로드 실패: {e}")
             return False
     except Exception as e:
-        print(f"⚠️  .env 파일 로드 실패: {e}")
+        print(f".env 파일 로드 실패: {e}")
         return False
 
-# 환경변수 로드 실행
 load_env_file()
 
 import cv2
@@ -61,7 +56,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 try:
     import openai
-    # OpenAI 라이브러리 버전 확인 (다양한 방법으로 시도)
     try:
         openai_version = openai.__version__
     except AttributeError:
@@ -71,24 +65,21 @@ try:
         except:
             openai_version = "unknown"
     HAS_OPENAI = True
-    print(f"🔍 OpenAI 패키지 로드 성공: v{openai_version}")
+    print(f"OpenAI 패키지 로드 성공: v{openai_version}")
 except ImportError:
     HAS_OPENAI = False
     openai_version = None
-    print("⚠️  OpenAI 패키지가 설치되지 않음")
+    print("OpenAI 패키지가 설치되지 않음")
 import asyncio
 import requests
 from datetime import datetime
 
-# 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# 개선된 로깅 설정
 import sys
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
-# 로그 레벨 매핑
 level_mapping = {
     'DEBUG': logging.DEBUG,
     'INFO': logging.INFO,
@@ -97,37 +88,30 @@ level_mapping = {
     'ERROR': logging.ERROR
 }
 
-# 커스텀 포맷터
 class SmartMirrorFormatter(logging.Formatter):
-    """스마트 미러 전용 로그 포맷터"""
     
     def __init__(self):
         super().__init__()
         self.log_level = LOG_LEVEL
         
-        # 이모지 매핑 (INFO 레벨에서는 핵심만)
-        self.emojis = {
-            'DEBUG': '🔍',
-            'INFO': '',      # INFO는 이모지 없이 깔끔하게
-            'WARNING': '⚠️',
-            'ERROR': '❌',
-            'CRITICAL': '💥'
+        self.prefixes = {
+            'DEBUG': '[DEBUG]',
+            'INFO': '',
+            'WARNING': '[WARNING]',
+            'ERROR': '[ERROR]',
+            'CRITICAL': '[CRITICAL]'
         }
     
     def format(self, record):
-        # LOG_LEVEL에 따른 포맷 조정
         if self.log_level == 'INFO':
-            # 발표용 간결한 포맷
-            emoji = self.emojis.get(record.levelname, '')
-            prefix = f"{emoji} " if emoji else ""
-            return f"{prefix}{record.getMessage()}"
+            prefix = self.prefixes.get(record.levelname, '')
+            prefix_str = f"{prefix} " if prefix else ""
+            return f"{prefix_str}{record.getMessage()}"
         else:
-            # DEBUG 모드 - 상세 정보 포함
-            emoji = self.emojis.get(record.levelname, '')
+            prefix = self.prefixes.get(record.levelname, '')
             timestamp = self.formatTime(record, '%H:%M:%S')
-            return f"[{timestamp}] [{record.levelname}] {emoji}{record.getMessage()}"
+            return f"[{timestamp}] [{record.levelname}] {prefix}{record.getMessage()}"
 
-# 로깅 설정
 logging.basicConfig(
     level=level_mapping.get(LOG_LEVEL, logging.INFO),
     format='%(message)s',
@@ -137,62 +121,38 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-# 커스텀 포맷터 적용
 for handler in logger.handlers:
     handler.setFormatter(SmartMirrorFormatter())
 
-# 로그 레벨 정보 출력
 logger.info(f"AI 서버 로그 레벨: {LOG_LEVEL}")
 
 app = Flask(__name__)
 CORS(app)
 
 class WeatherService:
-    """OpenWeather API를 사용한 날씨 정보 서비스"""
     
     def __init__(self, api_key=None):
-        # 환경변수 상세 디버깅
-        print("🔍🔍🔍 WeatherService 초기화 시작...")
+        print("WeatherService 초기화 시작...")
         openweather_key = os.environ.get('OPENWEATHER_API_KEY')
-        print(f"� OPENWEATHER_API_KEY 환경변수: {'✅있음' if openweather_key else '❌없음'}")
+        print(f"OPENWEATHER_API_KEY 환경변수: {'있음' if openweather_key else '없음'}")
         if openweather_key:
-            print(f"   📏 키 길이: {len(openweather_key)}자")
-            print(f"   🔤 시작 8자: {openweather_key[:8]}...")
-            print(f"   🔤 끝 8자: ...{openweather_key[-8:]}")
+            print(f"   키 길이: {len(openweather_key)}자")
+            print(f"   시작 8자: {openweather_key[:8]}...")
+            print(f"   끝 8자: ...{openweather_key[-8:]}")
         else:
-            print("   ❌ API 키가 환경변수에서 로드되지 않음!")
+            print("   API 키가 환경변수에서 로드되지 않음!")
         
         self.api_key = api_key or openweather_key
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
         self.enabled = bool(self.api_key)
         
-        print(f"🔧 WeatherService 최종 설정:")
-        print(f"   🔑 API 키 최종 설정됨: {'✅예' if self.api_key else '❌아니오'}")
-        print(f"   🌐 서비스 활성화 상태: {'✅예' if self.enabled else '❌아니오'}")
-        print(f"   🌍 API URL: {self.base_url}")
-        
         if not self.enabled:
-            print("⚠️⚠️⚠️ API 키가 없어서 기본 날씨값(13도) 사용!")
             logger.warning("OpenWeather API 키가 설정되지 않음. 기본 날씨값 사용")
         else:
-            print(f"✅✅✅ OpenWeather API 준비 완료!")
-            logger.info(f"OpenWeather API 연동 활성화: {'*' * max(1, len(self.api_key)-8)}{self.api_key[-4:]}")
+            logger.info("OpenWeather API 연동 활성화")
     
     def get_weather_data(self, city="Seoul", country_code="KR"):
-        """
-        현재 날씨 정보 가져오기
-        
-        Args:
-            city: 도시명 (기본값: Seoul)
-            country_code: 국가 코드 (기본값: KR)
-            
-        Returns:
-            dict: 날씨 정보 또는 기본값
-        """
-        logger.info(f"🌤️ WeatherService.get_weather_data() 호출됨 - enabled: {self.enabled}")
-        
         if not self.enabled:
-            logger.warning("API 키가 없어서 기본 날씨 사용")
             return self._get_default_weather()
         
         try:
@@ -203,19 +163,15 @@ class WeatherService:
                 'lang': 'kr'       # 한국어 설명
             }
             
-            logger.info(f"🌤️  OpenWeather API 호출 시작: {city}, {country_code}")
-            logger.info(f"API URL: {self.base_url}")
-            logger.info(f"API 키 확인: {'*' * (len(self.api_key)-4)}{self.api_key[-4:] if self.api_key else 'None'}")
+            logger.info(f"OpenWeather API 호출: {city}, {country_code}")
             
             response = requests.get(self.base_url, params=params, timeout=10)
-            logger.info(f"📡 API 응답 상태: {response.status_code}")
             
             if response.status_code != 200:
-                logger.error(f"❌ API 응답 오류: {response.status_code} - {response.text}")
+                logger.error(f"API 응답 오류: {response.status_code} - {response.text}")
                 return self._get_default_weather()
             
             weather_data = response.json()
-            logger.info(f"📊 API 원본 응답 데이터: {weather_data}")
             
             # 응답 데이터 파싱
             actual_temp = weather_data['main']['temp']
@@ -231,27 +187,22 @@ class WeatherService:
                 'timestamp': datetime.now().isoformat()
             }
             
-            logger.info(f"✅ 날씨 정보 파싱 완료: {result['city']} {result['temp']}°C ({result['description']})")
-            logger.info(f"🌡️ 원본 온도: {actual_temp}, 반올림 온도: {result['temp']}")
+            logger.info(f"날씨: {result['city']} {result['temp']}°C ({result['description']})")
             return result
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ OpenWeather API 요청 실패: {e}")
-            logger.warning("🔄 기본 날씨 정보 사용")
+            logger.error(f"OpenWeather API 요청 실패: {e}")
             return self._get_default_weather()
         except KeyError as e:
-            logger.error(f"❌ 날씨 데이터 파싱 실패: {e}")
-            logger.warning("🔄 기본 날씨 정보 사용")
+            logger.error(f"날씨 데이터 파싱 실패: {e}")
             return self._get_default_weather()
         except Exception as e:
-            logger.error(f"❌ 예상치 못한 날씨 API 오류: {e}")
-            logger.warning("🔄 기본 날씨 정보 사용")
+            logger.error(f"날씨 API 오류: {e}")
             return self._get_default_weather()
     
     def _get_default_weather(self):
         """API 실패 시 기본 날씨 정보"""
-        logger.warning("🔄 _get_default_weather() 호출됨 - 기본값 13도 사용")
-        default_weather = {
+        return {
             'temperature': 13,
             'temp': 13,
             'feels_like': 13,
@@ -262,31 +213,23 @@ class WeatherService:
             'country': 'KR',
             'timestamp': datetime.now().isoformat()
         }
-        logger.info(f"기본 날씨 데이터 반환: {default_weather}")
-        return default_weather
 
 class IntegratedAIServer:
     def __init__(self):
         """통합 AI 분석 서버 초기화"""
-        logger.info("🚀 통합 AI 분석 서버 초기화 중...")
+        logger.info("통합 AI 분석 서버 초기화 중...")
         
         # GPU 사용 가능 여부 확인
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"🔧 사용 디바이스: {self.device}")
+        logger.info(f"사용 디바이스: {self.device}")
         
         # OpenAI API 설정
         openai_key = os.environ.get('OPENAI_API_KEY')
-        print(f"🔍 OPENAI_API_KEY 환경변수: {'있음' if openai_key else '없음'}")
-        if openai_key:
-            print(f"   키 길이: {len(openai_key)}, 시작: {openai_key[:7]}...")
-        
         self.openai_api_key = openai_key
         self.use_chatgpt = HAS_OPENAI and self.openai_api_key
         
         if self.use_chatgpt:
             try:
-                # OpenAI 클라이언트 초기화 (안전한 방식)
-                print(f"🔍 OpenAI 버전: {openai_version}")
                 
                 # 다양한 초기화 방식 시도
                 try:
@@ -375,37 +318,37 @@ class IntegratedAIServer:
             ]
         }
         
-        logger.info("✅ 통합 AI 분석 서버 초기화 완료!")
+        logger.info("통합 AI 분석 서버 초기화 완료!")
     
     def _init_emotion_models(self):
         """감정 분석 모델들 초기화"""
         try:
             # 얼굴 표정 분석 모델
-            logger.info("📷 얼굴 표정 감정 분석 모델 로딩 중...")
+            logger.info("얼굴 표정 감정 분석 모델 로딩 중...")
             self.face_emotion_classifier = pipeline(
                 "image-classification",
                 model="trpakov/vit-face-expression",
                 device=0 if self.device.type == "cuda" else -1
             )
-            logger.info("✅ 표정 분석 모델 로딩 완료!")
+            logger.info("표정 분석 모델 로딩 완료!")
             
             # 음성 감정 분석용 특성 추출 준비
-            logger.info("🎤 음성 감정 분석 준비 완료!")
+            logger.info("음성 감정 분석 준비 완료!")
             
         except Exception as e:
-            logger.error(f"❌ 감정 분석 모델 로딩 실패: {e}")
+            logger.error(f"감정 분석 모델 로딩 실패: {e}")
             raise
     
     def _init_clip_model(self):
         """CLIP 모델 초기화 (옷차림 분석용)"""
         try:
-            logger.info("👔 CLIP 모델 로딩 중...")
+            logger.info("CLIP 모델 로딩 중...")
             self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
             self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
             self.clip_model = self.clip_model.to(self.device)
-            logger.info("✅ CLIP 모델 로딩 완료!")
+            logger.info("CLIP 모델 로딩 완료!")
         except Exception as e:
-            logger.error(f"❌ CLIP 모델 로딩 실패: {e}")
+            logger.error(f"CLIP 모델 로딩 실패: {e}")
             raise
     
     def _init_face_detector(self):
@@ -417,9 +360,9 @@ class IntegratedAIServer:
             if self.face_cascade.empty():
                 raise ValueError("얼굴 탐지 모델을 로드할 수 없습니다.")
             
-            logger.info("✅ 얼굴 탐지 모델 로딩 완료!")
+            logger.info("얼굴 탐지 모델 로딩 완료!")
         except Exception as e:
-            logger.error(f"❌ 얼굴 탐지 모델 로딩 실패: {e}")
+            logger.error(f"얼굴 탐지 모델 로딩 실패: {e}")
             raise
 
     # ========== 공통 유틸리티 함수들 ==========
@@ -651,7 +594,7 @@ class IntegratedAIServer:
                                  if emotion == most_frequent_emotion]
             avg_confidence = np.mean(emotion_confidences)
             
-            logger.info(f"✅ 최종 감정: {most_frequent_emotion} (신뢰도: {avg_confidence:.2f})")
+            logger.info(f"최종 감정: {most_frequent_emotion} (신뢰도: {avg_confidence:.2f})")
             
             return {
                 'success': True,
@@ -761,26 +704,26 @@ class IntegratedAIServer:
     def analyze_outfit_appropriateness(self, image: np.ndarray, weather_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """CLIP을 사용한 옷차림 적절성 분석"""
         try:
-            # 🔥🔥🔥 무조건 라즈베리파이 데이터 무시하고 맥북에서 실제 API 호출
-            logger.warning("🚫🚫🚫 입력된 weather_data 완전 무시! (라즈베리파이 20도 데이터 차단)")
-            logger.info("🌤️ 맥북 WeatherService에서 실제 OpenWeather API 직접 호출 시작")
+            # 무조건 라즈베리파이 데이터 무시하고 맥북에서 실제 API 호출
+            logger.warning("입력된 weather_data 완전 무시! (라즈베리파이 20도 데이터 차단)")
+            logger.info("맥북 WeatherService에서 실제 OpenWeather API 직접 호출 시작")
             
             # weather_data 파라미터를 완전히 무시하고 새로 호출
             fresh_weather_data = self.weather_service.get_weather_data()
-            logger.info(f"🌡️ 신규 API 호출 결과: {fresh_weather_data}")
+            logger.info(f"신규 API 호출 결과: {fresh_weather_data}")
             
             # 결과 검증
             if fresh_weather_data and fresh_weather_data.get('temp'):
                 weather_data = fresh_weather_data  # 새로운 데이터 사용
-                logger.info(f"✅ 실제 온도 획득 성공: {weather_data['temp']}°C")
+                logger.info(f"실제 온도 획득 성공: {weather_data['temp']}°C")
             else:
-                logger.error("❌ API 호출 실패, 한 번 더 시도...")
+                logger.error("API 호출 실패, 한 번 더 시도...")
                 retry_weather_data = self.weather_service.get_weather_data() 
                 if retry_weather_data and retry_weather_data.get('temp'):
                     weather_data = retry_weather_data
-                    logger.info(f"🔄 재시도 성공: {weather_data['temp']}°C")
+                    logger.info(f"재시도 성공: {weather_data['temp']}°C")
                 else:
-                    logger.error("💥 모든 API 호출 실패! 기본값 사용")
+                    logger.error("모든 API 호출 실패! 기본값 사용")
                     weather_data = self.weather_service._get_default_weather()
             
             temp = weather_data.get('temp') or weather_data.get('temperature')
@@ -792,7 +735,7 @@ class IntegratedAIServer:
             description = weather_data.get('description', '맑음')
             
             # 디버깅: 실제 날씨 데이터 확인
-            logger.info(f"🌡️ 날씨 데이터 디버깅: temp={temp}, condition={condition}, description={description}")
+            logger.info(f"날씨 데이터 디버깅: temp={temp}, condition={condition}, description={description}")
             logger.info(f"전체 weather_data: {weather_data}")
             
             weather_category = self.get_weather_category(temp)
@@ -1044,8 +987,8 @@ class IntegratedAIServer:
             face_emotion = face_result.get('emotion', 'neutral')
             face_conf = face_result.get('confidence', 0.0)
             
-            logger.info(f"🎤 음성 감정: {voice_emotion} ({voice_conf:.2f})")
-            logger.info(f"📷 표정 감정: {face_emotion} ({face_conf:.2f})")
+            logger.info(f"음성 감정: {voice_emotion} ({voice_conf:.2f})")
+            logger.info(f"표정 감정: {face_emotion} ({face_conf:.2f})")
             
             # 통합 로직
             if voice_emotion == face_emotion:
@@ -1142,7 +1085,7 @@ def sanitize_for_json(obj):
 
 @app.route('/analyze/voice_emotion', methods=['POST'])
 def analyze_voice_emotion():
-    """🎤 음성 감정 분석 API"""
+    """음성 감정 분석 API"""
     try:
         data = request.get_json()
         
@@ -1160,7 +1103,7 @@ def analyze_voice_emotion():
         # 감정 분석
         result = server.analyze_voice_emotion_simple(features)
         
-        logger.info(f"🎤 음성 감정 분석 완료: {result['emotion']} (신뢰도: {result['confidence']:.2f})")
+        logger.info(f"음성 감정 분석 완료: {result['emotion']} (신뢰도: {result['confidence']:.2f})")
         
         return jsonify(sanitize_for_json({
             'success': True,
@@ -1178,7 +1121,7 @@ def analyze_voice_emotion():
 
 @app.route('/analyze/face_emotion', methods=['POST'])
 def analyze_face_emotion():
-    """📷 얼굴 표정 감정 분석 API (여러 이미지)"""
+    """얼굴 표정 감정 분석 API (여러 이미지)"""
     try:
         data = request.get_json()
         
@@ -1207,7 +1150,7 @@ def analyze_face_emotion():
             response_message = server.emotion_responses[result['emotion']][0]
             result['response_message'] = response_message
         
-        logger.info(f"📷 표정 감정 분석 완료: {result.get('emotion', 'Unknown')}")
+        logger.info(f"표정 감정 분석 완료: {result.get('emotion', 'Unknown')}")
         
         return jsonify(sanitize_for_json(result))
         
@@ -1220,7 +1163,7 @@ def analyze_face_emotion():
 
 @app.route('/analyze/outfit', methods=['POST'])
 def analyze_outfit():
-    """👔 옷차림 적절성 분석 API (OpenWeather API 연동)"""
+    """옷차림 적절성 분석 API (OpenWeather API 연동)"""
     try:
         data = request.get_json()
         
@@ -1232,8 +1175,8 @@ def analyze_outfit():
         # Base64 이미지를 OpenCV 이미지로 변환
         image = server.base64_to_image(data['photo'])
         
-        # 🔥 라즈베리파이 날씨 데이터 완전 무시 - 항상 맥북에서 실제 API 호출
-        logger.info("🌤️ 라즈베리파이 날씨 데이터 무시, 맥북에서 실제 OpenWeather API 호출")
+        # 라즈베리파이 날씨 데이터 완전 무시 - 항상 맥북에서 실제 API 호출
+        logger.info("라즈베리파이 날씨 데이터 무시, 맥북에서 실제 OpenWeather API 호출")
         
         # 옷차림 분석 (weather_data=None으로 강제 설정하여 API 호출 보장)
         result = server.analyze_outfit_appropriateness(image, weather_data=None)
@@ -1254,7 +1197,7 @@ def analyze_outfit():
 
 @app.route('/analyze/combined_emotion', methods=['POST'])
 def analyze_combined_emotion():
-    """🎭 통합 감정 분석 API (음성 + 표정)"""
+    """통합 감정 분석 API (음성 + 표정)"""
     try:
         data = request.get_json()
         
@@ -1282,7 +1225,7 @@ def analyze_combined_emotion():
         # 결과 통합
         combined_result = server.combine_emotion_analysis(voice_result, face_result)
         
-        logger.info(f"🎭 통합 감정 분석 완료: {combined_result.get('combined_emotion', 'Unknown')}")
+        logger.info(f"통합 감정 분석 완료: {combined_result.get('combined_emotion', 'Unknown')}")
         
         return jsonify(sanitize_for_json(combined_result))
         
@@ -1306,14 +1249,14 @@ def health_check():
 
 @app.route('/analyze_emotion', methods=['POST'])
 def analyze_emotion_legacy():
-    """🔄 기존 호환성: 감정 분석 API (음성 + 표정 통합)"""
+    """기존 호환성: 감정 분석 API (음성 + 표정 통합)"""
     try:
-        logger.info("🔍 /analyze_emotion 엔드포인트 호출됨")
+        logger.info("/analyze_emotion 엔드포인트 호출됨")
         
         # 요청 데이터 확인
         data = request.get_json()
         if not data:
-            logger.error("❌ 요청 데이터가 비어있음")
+            logger.error("요청 데이터가 비어있음")
             return jsonify({
                 'success': False, 
                 'error': 'No JSON data provided',
@@ -1358,7 +1301,7 @@ def analyze_emotion_legacy():
                 return jsonify(sanitize_for_json(result))
         
         else:
-            logger.error("❌ 오디오 데이터가 없음")
+            logger.error("오디오 데이터가 없음")
             logger.error(f"사용 가능한 키: {list(data.keys())}")
             return jsonify({
                 'success': False, 
@@ -1388,7 +1331,7 @@ if __name__ == '__main__':
         port = int(os.environ.get('AI_SERVER_PORT', 5052))
         host = os.environ.get('AI_SERVER_HOST', '0.0.0.0')
         
-        logger.info(f"🚀 통합 AI 분석 서버 시작... ({host}:{port})")
+        logger.info(f"통합 AI 분석 서버 시작... ({host}:{port})")
         get_ai_server()  # 모델 로딩
         
         # Flask 서버 실행

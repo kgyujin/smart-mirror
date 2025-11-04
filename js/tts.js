@@ -137,12 +137,10 @@ const generateSSML = (text) => {
   return ssmlText;
 };
 
-// 사용량 추적을 위한 간단한 로깅
 const logUsage = (text) => {
   const charCount = text.length;
   log.info(`TTS 사용량: ${charCount}자`);
   
-  // 월별 사용량 추적 (간단한 파일 기반)
   const usageFile = path.join(__dirname, '..', 'tts_usage.json');
   const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
   
@@ -160,7 +158,7 @@ const logUsage = (text) => {
     
     // 무료 사용량 경고 (400만 자 기준)
     if (usage[currentMonth] > 3500000) { // 350만 자에서 경고
-      log.warn(`⚠️ 월 사용량이 ${usage[currentMonth]}자에 도달했습니다. 무료 한도(400만 자)에 근접했습니다.`);
+      log.warn(`월 사용량이 ${usage[currentMonth]}자에 도달했습니다. 무료 한도(400만 자)에 근접했습니다.`);
     }
     
     fs.writeFileSync(usageFile, JSON.stringify(usage, null, 2));
@@ -178,7 +176,6 @@ const safeTTS = async (text, broadcast) => {
   const processedText = preprocessText(text);
   log.tts('시작:', processedText);
   
-  // 사용량 추적
   logUsage(processedText);
   
   isTTSActive = true;

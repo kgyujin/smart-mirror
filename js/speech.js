@@ -6,7 +6,6 @@ const wav = require('wav');
 const fs = require('fs');
 const path = require('path');
 
-// 설정 및 유틸리티 임포트
 const { 
   ETRI_API_KEY,
   ETRI_API_URL,
@@ -237,7 +236,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
           // 감정 분석용 음성 수집 (명령 모드일 때만)
           if (isCollectingEmotionAudio) {
             emotionAudioBuffer.push(audioBuffer);
-            log.verbose('🎤 감정 분석용 음성 청크 수집:', audioBuffer.length, 'bytes');
+            log.verbose('감정 분석용 음성 청크 수집:', audioBuffer.length, 'bytes');
           }
           
           // 음성인식만 수행 (감정 분석은 명령 완료 시점에)
@@ -268,7 +267,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
               // 감정 분석용 음성 수집 시작
               emotionAudioBuffer = []; // 이전 버퍼 초기화
               isCollectingEmotionAudio = true;
-              log.info('🎤 감정 분석용 음성 수집 시작');
+              log.info('감정 분석용 음성 수집 시작');
               
               // 기본 감정 상태로 초기화
               emotionManager.updateEmotionState('neutral', 0.5);
@@ -340,9 +339,9 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
                       // 전체 음성으로 감정 분석 수행
                       let emotionResult = null;
                       if (isCollectingEmotionAudio && emotionAudioBuffer.length > 0) {
-                        log.info('🎯 전체 음성으로 감정 분석 시작');
+                        log.info('전체 음성으로 감정 분석 시작');
                         const fullAudioBuffer = Buffer.concat(emotionAudioBuffer);
-                        log.info(`📊 수집된 음성 데이터: ${fullAudioBuffer.length} bytes (${emotionAudioBuffer.length} 청크)`);
+                        log.info(`수집된 음성 데이터: ${fullAudioBuffer.length} bytes (${emotionAudioBuffer.length} 청크)`);
                         
                         const fullPcmBuffer = Buffer.concat(emotionAudioBuffer);
 
@@ -381,7 +380,7 @@ const startContinuousHotwordListener = (processRecognizedCommand, broadcast, dep
                           try {
                             emotionResult = await analyzeEmotion(wavBuffer);
                             if (emotionResult && emotionResult.success) {
-                              log.info(`🎭 감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
+                              log.info(`감정 분석 결과: ${emotionResult.emotion} (신뢰도: ${(emotionResult.confidence * 100).toFixed(1)}%)`);
                             } else {
                               log.warn('감정 분석 실패 또는 신뢰도 부족');
                               emotionResult = {

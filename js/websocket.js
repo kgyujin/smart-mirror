@@ -1,7 +1,6 @@
 const WebSocket = require('ws');
 const { log } = require('./logging');
 
-// ========== 유틸: WebSocket 브로드캐스트 ==========
 let wss = null;
 
 const broadcast = (messageObj) => {

@@ -6,12 +6,12 @@ const wav = require('wav');
 const dns = require('node:dns');
 const OpenAI = require('openai');
 
-// DNS 설정
+// DNS IPv4 우선 설정 (네트워크 안정성 향상)
 if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
 
-// 모듈 import
+// 핵심 모듈 로드
 const { 
   PORT, 
   OPENAI_API_KEY, 
@@ -54,7 +54,6 @@ const {
 } = require('./js/assistant');
 const { initializeWebSocket } = require('./js/websocket');
 
-// ✨ AI 통합 모듈 import 추가
 const {
   initializeAIModules,
   processRecognizedCommandWithAI,
@@ -80,15 +79,12 @@ app.use(express.json());
 const personalizationSystem = new PersonalizationSystem(openai);
 const { conversationContext } = require('./js/conversation');
 
-// WebSocket 초기화 (서버 시작 후 설정)
 let broadcast = null;
 
-// ========== API 라우트들 ==========
-
-// 날씨 API
+// 날씨 데이터 조회
 app.get('/api/weather', async (req, res) => {
   try {
-    const weatherData = await fetchWeatherData(false); // 캐시 무시하고 새로 가져오기
+    const weatherData = await fetchWeatherData(false);
     res.json(weatherData);
   } catch (err) {
     log.error('날씨 API 오류:', err);
@@ -96,7 +92,7 @@ app.get('/api/weather', async (req, res) => {
   }
 });
 
-// ETRI 음성인식 기반 Assistant API
+// 음성 인식 기반 대화형 어시스턴트
 app.get('/api/assistant', async (req, res) => {
   try {
     const outputPath = path.join(__dirname, 'user_input.wav');
@@ -110,7 +106,7 @@ app.get('/api/assistant', async (req, res) => {
     const mic = record({
       sampleRateHertz: 16000,
       threshold: 0,
-      verbose: false, // 마이크 로그 비활성화
+      verbose: false,
       recordProgram: 'sox',
       silence: '2.0',
     });
@@ -182,12 +178,10 @@ app.get('/api/assistant', async (req, res) => {
                   try {
           log.info('스마트 문맥 인식 대화 시스템 시작...');
           
-          // 음성 감정 분석 수행
           const audioBuffer = fs.readFileSync(outputPath);
           const emotionResult = await analyzeEmotion(audioBuffer);
-          log.info('😊 음성 감정 분석 결과:', emotionResult);
+          log.info('음성 감정 분석 결과:', emotionResult);
           
-          // 새로운 스마트 대화 시스템 사용
           const dependencies = {
             conversationContext,
             openai,
@@ -202,7 +196,7 @@ app.get('/api/assistant', async (req, res) => {
           
           const assistantResponse = await processRecognizedCommand(query, dependencies);
           
-          log.info('✅ 스마트 문맥 인식 대화 시스템 응답:', assistantResponse);
+          log.info('스마트 문맥 인식 대화 시스템 응답:', assistantResponse);
           
           sendResponse({
             response: assistantResponse,
@@ -235,7 +229,6 @@ app.get('/api/assistant', async (req, res) => {
   }
 });
 
-// 시간 API
 app.get('/api/time', (req, res) => {
   const now = new Date();
 
@@ -279,10 +272,8 @@ app.post('/api/news', async (req, res) => {
   }
 });
 
-// 캘린더 API
 app.get('/api/calendar/today', async (req, res) => {
   try {
-    // 캐시 무효화 헤더 설정 (실시간 업데이트 보장)
     res.set({
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
@@ -291,7 +282,6 @@ app.get('/api/calendar/today', async (req, res) => {
     
     const events = await fetchTodayEvents();
     
-    // 응답에 타임스탬프 포함
     res.json({
       events: events,
       lastUpdated: new Date().toISOString(),
@@ -303,10 +293,9 @@ app.get('/api/calendar/today', async (req, res) => {
   }
 });
 
-// 캘린더 수동 새로고침 API 엔드포인트
 app.post('/api/calendar/refresh', async (req, res) => {
   try {
-    log.info('📅 캘린더 수동 새로고침 요청됨');
+    log.info('캘린더 수동 새로고침 요청됨');
     await checkCalendarUpdates();
     const events = await fetchTodayEvents();
     
@@ -364,7 +353,6 @@ app.post('/api/chat', async (req, res) => {
       processNewsQuery
     };
     
-    // ✨ AI 강화 대화 처리 사용
     const reply = await processRecognizedCommandWithAI(message, dependencies);
     res.json({ reply: reply || '' });
   } catch (e) {
@@ -543,33 +531,27 @@ const server = app.listen(PORT, async () => {
   log.info(`서버 실행 중: http://localhost:${PORT}`);
   log.info('ETRI 음성인식 기반 스마트 미러 서비스 준비 완료');
   
-  // ✨ AI 모듈 초기화 추가
   try {
     const aiInitialized = await initializeAIModules();
     if (aiInitialized) {
-      log.info('🤖 AI 기능 (감정분석, 표정인식, 옷차림분석) 활성화 완료!');
+      log.info('AI 기능 (감정분석, 표정인식, 옷차림분석) 활성화 완료');
     } else {
-      log.warn('⚠️ AI 기능 초기화에 실패했습니다. 기본 기능만 사용됩니다.');
+      log.warn('AI 기능 초기화에 실패했습니다. 기본 기능만 사용됩니다.');
     }
   } catch (error) {
     log.error('AI 모듈 초기화 오류:', error);
   }
   
-  log.info('🎭 자연스러운 AI 상호작용이 가능한 스마트 미러 준비 완료!');
-  log.info('💬 "나 오늘 기분이 안 좋아", "오늘 나 어때?" 같은 자연스러운 대화를 시도해보세요!');
+  log.info('자연스러운 AI 상호작용이 가능한 스마트 미러 준비 완료');
 });
 
-// WebSocket 초기화
 const { broadcast: wsbroadcast } = initializeWebSocket(server);
 broadcast = wsbroadcast;
 
-// ✨ AI API 라우트 추가
 addAIApiRoutes(app);
 
-// 개인화 시스템 시작 (WebSocket 초기화 후)
 personalizationSystem.startMessageUpdates(broadcast, environmentalAwareness);
 
-// 상시 리스닝 시작
 if (ALWAYS_LISTEN) {
   const dependencies = {
     conversationContext,
@@ -598,7 +580,6 @@ if (ALWAYS_LISTEN) {
   );
 }
 
-// 캘린더 실시간 모니터링 시스템 (초고빈도)
 let lastCalendarHash = null;
 let calendarUpdateCount = 0;
 
@@ -608,15 +589,14 @@ const checkCalendarUpdates = async () => {
     const currentHash = JSON.stringify(events.map(e => `${e.id}-${e.start}-${e.summary}`).sort());
     
     if (lastCalendarHash === null) {
-      // 초기 해시 설정
       lastCalendarHash = currentHash;
-      log.info(`📅 캘린더 모니터링 시작: ${events.length}개 일정`);
+      log.info(`캘린더 모니터링 시작: ${events.length}개 일정`);
       return;
     }
     
     if (lastCalendarHash !== currentHash) {
       calendarUpdateCount++;
-      log.info(`📅 캘린더 변경 감지! (#${calendarUpdateCount}): ${events.length}개 일정 → 즉시 클라이언트 업데이트`);
+      log.info(`캘린더 변경 감지! (#${calendarUpdateCount}): ${events.length}개 일정 → 즉시 클라이언트 업데이트`);
       
       // 모든 WebSocket 클라이언트에 즉시 업데이트 전송
       if (broadcast) {
@@ -636,23 +616,19 @@ const checkCalendarUpdates = async () => {
   }
 };
 
-// 🚀 초고빈도 캘린더 모니터링 (10초마다!)
 setInterval(checkCalendarUpdates, 10 * 1000);
 
-// 추가: 1분마다 강제 체크 (안전장치)
 setInterval(async () => {
   try {
-    log.debug('📅 캘린더 정기 체크 (1분)');
+    log.debug('캘린더 정기 체크 (1분)');
     await checkCalendarUpdates();
   } catch (error) {
     log.warn('캘린더 정기 체크 실패:', error.message);
   }
 }, 60 * 1000);
 
-// 초기 캘린더 해시 설정 (5초 후)
 setTimeout(checkCalendarUpdates, 5000);
 
-// 주기적 컨텍스트 정리
 setInterval(() => {
   conversationContext.cleanup();
 }, 10 * 60 * 1000);

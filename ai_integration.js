@@ -1,5 +1,7 @@
-// ========== AI 기능 통합 모듈 ==========
-// app.js에 추가할 핵심 코드들
+/**
+ * AI 기능 통합 모듈
+ * 음성/표정 감정 분석, 옷차림 분석 등 AI 기능 제공
+ */
 
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +10,6 @@ const axios = require('axios');
 const { log } = require('./js/enhanced-logging');
 const { processRecognizedCommand } = require('./js/conversation');
 
-// 날씨 데이터 import 추가 (fetchWeatherData 오류 해결)
 let fetchWeatherData = null;
 try {
   const weatherModule = require('./js/weather');
@@ -19,16 +20,14 @@ try {
 
 // AI 서버 설정
 const AI_SERVER_HOST = process.env.AI_SERVER_HOST || '192.168.0.162';
-const AI_SERVER_PORT = process.env.AI_SERVER_PORT || 5052;  // 문자열 -> 숫자로 변경
+const AI_SERVER_PORT = process.env.AI_SERVER_PORT || 5052;
 const AI_SERVER_URL = `http://${AI_SERVER_HOST}:${AI_SERVER_PORT}`;
 
-// 포트 설정 검증 및 로깅
+// AI 서버 연결 확인
 if (!process.env.AI_SERVER_HOST || !process.env.AI_SERVER_PORT) {
   log.warn('AI_SERVER_HOST 또는 AI_SERVER_PORT가 환경변수에 설정되지 않음');
   log.info(`기본 AI 서버: ${AI_SERVER_URL}`);
 }
-
-// ========== 1. 오디오 캡처 모듈 ==========
 
 class AudioCapture {
   constructor() {
@@ -37,9 +36,9 @@ class AudioCapture {
   }
 
   /**
-   * 마이크로부터 오디오 녹음 (Base64 반환)
-   * @param {number} duration - 녹음 시간 (초)
-   * @returns {Promise<string>} Base64 오디오 데이터
+   * 오디오 녹음 및 Base64 인코딩
+   * @param {number} duration - 녹음 시간 (초, 최대 5초)
+   * @returns {Promise<string>} Base64 인코딩된 오디오 데이터
    */
   async captureAudio(duration = 3) {
     return new Promise((resolve, reject) => {
@@ -48,7 +47,6 @@ class AudioCapture {
         return;
       }
 
-      // ETRI API 제한을 고려하여 최대 5초로 제한
       const safeDuration = Math.min(duration, 5);
       const timestamp = Date.now();
       const tempPath = path.join(__dirname, 'tmp', `voice_${timestamp}.wav`);
@@ -64,20 +62,18 @@ class AudioCapture {
         }
       }
       
-      // sox 명령어로 오디오 녹음 (ETRI API 최적화)
       const recordCommand = [
         'sox', '-t', 'alsa', 'default',
-        '-r', '16000',  // 16kHz 샘플링
-        '-c', '1',      // 모노
-        '-b', '16',     // 16bit
+        '-r', '16000',
+        '-c', '1',
+        '-b', '16',
         tempPath,
         'trim', '0', safeDuration.toString(),
-        'gain', '-n'    // 정규화로 음질 향상
+        'gain', '-n'
       ];
 
       this.isRecording = true;
       
-      // 타임아웃 설정 (녹음 시간 + 5초)
       const timeout = setTimeout(() => {
         this.isRecording = false;
         this.cleanupAudioFile(tempPath);
@@ -92,14 +88,13 @@ class AudioCapture {
         
         if (code === 0) {
           try {
-            // 파일 존재 및 크기 확인
             if (!fs.existsSync(tempPath)) {
               reject(new Error('녹음된 오디오 파일이 없습니다'));
               return;
             }
             
             const stats = fs.statSync(tempPath);
-            const maxSize = 1024 * 1024; // 1MB 제한 (ETRI API)
+            const maxSize = 1024 * 1024;
             
             if (stats.size > maxSize) {
               this.cleanupAudioFile(tempPath);
@@ -107,17 +102,15 @@ class AudioCapture {
               return;
             }
             
-            if (stats.size < 1000) { // 1KB 미만
+            if (stats.size < 1000) {
               this.cleanupAudioFile(tempPath);
               reject(new Error('녹음된 오디오가 너무 짧습니다'));
               return;
             }
             
-            // 파일을 Base64로 변환
             const audioBuffer = fs.readFileSync(tempPath);
             const base64Audio = audioBuffer.toString('base64');
             
-            // 임시 파일 정리
             this.cleanupAudioFile(tempPath);
             
             log.debug(`오디오 녹음 완료: ${audioBuffer.length} bytes (${safeDuration}초)`);
@@ -142,10 +135,6 @@ class AudioCapture {
     });
   }
   
-  /**
-   * 오디오 파일 안전 삭제
-   * @param {string} filePath 
-   */
   cleanupAudioFile(filePath) {
     try {
       if (fs.existsSync(filePath)) {
@@ -156,15 +145,8 @@ class AudioCapture {
     }
   }
 
-  /**
-   * 현재 발화 중인 오디오 실시간 캡처 (음성 인식 중)
-   * @returns {Promise<string>} Base64 오디오 데이터
-   */
   async captureCurrentSpeech() {
-    // 현재 음성 인식이 활성화된 상태에서 발화 내용을 캡처
-    // 기존 speech.js의 음성 인식과 연동
     try {
-      // 2초간 현재 발화 캡처
       return await this.captureAudio(2);
     } catch (error) {
       log.error('현재 발화 캡처 실패:', error);
@@ -173,17 +155,15 @@ class AudioCapture {
   }
 }
 
-// ========== 2. 이미지 캡처 모듈 ==========
-
 class ImageCapture {
   constructor() {
-    this.device = '/dev/video0';  // 기본 웹캠
+    this.device = '/dev/video0';
     this.capturing = false;
   }
 
   /**
-   * 단일 이미지 촬영 (Base64 반환) - 안정성 강화 버전
-   * @returns {Promise<string>} Base64 이미지 데이터
+   * 웹캠으로 이미지 촬영 후 Base64 반환
+   * @returns {Promise<string>} Base64 인코딩된 이미지 데이터
    */
   async capturePhoto() {
     return new Promise((resolve, reject) => {
@@ -206,21 +186,19 @@ class ImageCapture {
         }
       }
       
-      // fswebcam 명령어로 이미지 촬영 (타임아웃 설정)
       const captureCommand = [
         'fswebcam',
         '-r', '640x480',
         '--no-banner',
-        '-S', '8',          // 8프레임 스킵으로 더 안정화
-        '--jpeg', '90',     // 품질 향상
-        '--fps', '15',      // FPS 제한으로 안정성 확보
+        '-S', '8',
+        '--jpeg', '90',
+        '--fps', '15',
         '-d', this.device,
         tempPath
       ];
 
       this.capturing = true;
       
-      // 타임아웃 설정 (10초)
       const timeout = setTimeout(() => {
         this.capturing = false;
         reject(new Error('이미지 촬영 타임아웃 (10초 초과)'));
@@ -238,15 +216,13 @@ class ImageCapture {
         }
 
         try {
-          // 파일 존재 확인
           if (!fs.existsSync(tempPath)) {
             reject(new Error('촬영된 이미지 파일이 없습니다'));
             return;
           }
           
-          // 파일 크기 확인
           const stats = fs.statSync(tempPath);
-          if (stats.size < 1000) { // 1KB 미만
+          if (stats.size < 1000) {
             this.cleanupFile(tempPath);
             reject(new Error('촬영된 이미지 크기가 너무 작습니다'));
             return;
@@ -270,10 +246,6 @@ class ImageCapture {
     });
   }
   
-  /**
-   * 파일 안전 삭제
-   * @param {string} filePath 
-   */
   cleanupFile(filePath) {
     try {
       if (fs.existsSync(filePath)) {
@@ -285,9 +257,9 @@ class ImageCapture {
   }
 
   /**
-   * 연속 이미지 촬영 (표정 분석용 - 안정성 강화 버전)
-   * @param {number} count - 촬영할 이미지 수
-   * @param {number} interval - 촬영 간격 (ms)
+   * 연속 이미지 촬영 (표정 분석용)
+   * @param {number} count - 촬영 매수
+   * @param {number} interval - 촬영 간격 (밀리초)
    * @returns {Promise<string[]>} Base64 이미지 배열
    */
   async captureMultiplePhotos(count = 5, interval = 800) {
@@ -303,15 +275,13 @@ class ImageCapture {
       
       while (retries <= maxRetries && !success) {
         try {
-          // 충분한 대기 시간으로 카메라 안정화
           if (i > 0 || retries > 0) {
             await new Promise(resolve => setTimeout(resolve, interval));
           }
           
           const photo = await this.capturePhoto();
           
-          // 이미지 크기 검증
-          if (photo && photo.length > 1000) { // 최소 1KB 이상
+          if (photo && photo.length > 1000) {
             photos.push(photo);
             log.info(`사진 ${i + 1}/${count} 촬영 완료`);
             success = true;
@@ -325,7 +295,6 @@ class ImageCapture {
           
           if (retries <= maxRetries) {
             log.warn(errorMsg + ' - 재시도 중...');
-            // 재시도 전 추가 대기
             await new Promise(resolve => setTimeout(resolve, 1000));
           } else {
             log.error(errorMsg);
@@ -335,14 +304,12 @@ class ImageCapture {
       }
     }
     
-    // 결과 요약
     if (failedAttempts.length > 0) {
       log.warn(`촬영 실패한 이미지: ${failedAttempts.map(f => f.index).join(', ')}`);
     }
     
     log.info(`총 ${photos.length}/${count}장 촬영 완료`);
     
-    // 최소 1장은 성공해야 함
     if (photos.length === 0) {
       throw new Error('모든 이미지 촬영이 실패했습니다');
     }
@@ -351,21 +318,18 @@ class ImageCapture {
   }
 
   /**
-   * 옷차림 분석용 이미지 촬영 (여러 장 중 최고 품질 선택)
-   * @returns {Promise<string>} 최고 품질 Base64 이미지
+   * 옷차림 분석용 대표 이미지 촬영
+   * @returns {Promise<string>} Base64 이미지
    */
   async captureOutfitPhoto() {
     try {
-      // 5장 촬영
       const photos = await this.captureMultiplePhotos(5, 300);
       
       if (photos.length === 0) {
         throw new Error('촬영된 이미지가 없습니다');
       }
       
-      // 현재는 첫 번째 이미지 반환 (추후 품질 평가 로직 추가 가능)
-      // TODO: 이미지 품질 평가 (선명도, 밝기 등)하여 최적 이미지 선택
-      log.info('🎯 대표 이미지 선택 완료');
+      log.info('대표 이미지 선택 완료');
       return photos[0];
       
     } catch (error) {
@@ -375,17 +339,11 @@ class ImageCapture {
   }
 }
 
-// ========== 3. AI 서버 통신 모듈 ==========
-
 class AIServerClient {
   constructor() {
     this.serverUrl = AI_SERVER_URL;
   }
 
-  /**
-   * AI 서버 상태 확인
-   * @returns {Promise<boolean>}
-   */
   async checkHealth() {
     try {
       const response = await axios.get(`${this.serverUrl}/health`, { timeout: 5000 });
@@ -396,11 +354,6 @@ class AIServerClient {
     }
   }
 
-  /**
-   * 음성 감정 분석 요청
-   * @param {string} base64Audio - Base64 오디오 데이터
-   * @returns {Promise<object>} 감정 분석 결과
-   */
   async analyzeVoiceEmotion(base64Audio) {
     try {
       const response = await axios.post(`${this.serverUrl}/analyze/voice_emotion`, {
@@ -417,11 +370,6 @@ class AIServerClient {
     }
   }
 
-  /**
-   * 표정 감정 분석 요청
-   * @param {string[]} base64Photos - Base64 이미지 배열
-   * @returns {Promise<object>} 감정 분석 결과
-   */
   async analyzeFaceEmotion(base64Photos) {
     try {
       const response = await axios.post(`${this.serverUrl}/analyze/face_emotion`, {
@@ -566,7 +514,7 @@ class ConversationAITrigger {
    */
   async executeEmotionAnalysisWorkflow(userText, detectedEmotion) {
     try {
-      log.info(`🎭 감정 분석 워크플로우 시작: ${detectedEmotion}`);
+      log.info(`감정 분석 워크플로우 시작: ${detectedEmotion}`);
       
       // 1. 현재 발화 오디오 캡처 (비동기 시작)
       const audioPromise = this.audioCapture.captureCurrentSpeech()
@@ -589,7 +537,7 @@ class ConversationAITrigger {
       
       if (audioData && photos.length > 0) {
         // 음성 + 표정 통합 분석
-        log.info('🎭 통합 감정 분석 수행');
+        log.info('통합 감정 분석 수행');
         result = await this.aiClient.analyzeCombinedEmotion(audioData, photos);
         
         if (result.success) {
@@ -597,7 +545,7 @@ class ConversationAITrigger {
         }
       } else if (photos.length > 0) {
         // 표정만 분석
-        log.info('📷 표정 감정 분석 수행');
+        log.info('표정 감정 분석 수행');
         result = await this.aiClient.analyzeFaceEmotion(photos);
         
         if (result.success) {
@@ -605,7 +553,7 @@ class ConversationAITrigger {
         }
       } else if (audioData) {
         // 음성만 분석
-        log.info('🎤 음성 감정 분석 수행');
+        log.info('음성 감정 분석 수행');
         result = await this.aiClient.analyzeVoiceEmotion(audioData);
         
         if (result.success) {
@@ -629,7 +577,7 @@ class ConversationAITrigger {
    */
   async executeOutfitAnalysisWorkflow(weatherData = null) {
     try {
-      log.info('👔 옷차림 분석 워크플로우 시작');
+      log.info('옷차림 분석 워크플로우 시작');
       
       // 1. 날씨 정보 확보 (라즈베리파이에서 가져오기)
       if (!weatherData) {
@@ -665,7 +613,7 @@ class ConversationAITrigger {
       const result = await this.aiClient.analyzeOutfit(photo, weatherInfo);
       
       if (result.success) {
-        log.info(`👔 옷차림 분석 완료: ${result.is_appropriate ? '적절' : '부적절'}`);
+        log.info(`옷차림 분석 완료: ${result.is_appropriate ? '적절' : '부적절'}`);
         return result.response_message || '옷차림을 분석해봤어요!';
       } else {
         return '옷차림을 분석해봤는데, 조금 애매하네요. 어떻게 생각하세요?';
@@ -735,7 +683,7 @@ let conversationTrigger = null;
  */
 async function initializeAIModules() {
   try {
-    log.info('🚀 AI 기능 모듈 초기화 시작...');
+    log.info('AI 기능 모듈 초기화 시작...');
     
     // 인스턴스 생성
     audioCapture = new AudioCapture();
@@ -746,15 +694,15 @@ async function initializeAIModules() {
     // AI 서버 연결 확인
     const isServerHealthy = await aiClient.checkHealth();
     if (isServerHealthy) {
-      log.info('✅ AI 서버 연결 확인 완료');
+      log.info('AI 서버 연결 확인 완료');
     } else {
-      log.warn('⚠️ AI 서버에 연결할 수 없습니다. AI 기능이 제한될 수 있습니다.');
+      log.warn('AI 서버에 연결할 수 없습니다. AI 기능이 제한될 수 있습니다.');
     }
     
-    log.info('✅ AI 기능 모듈 초기화 완료');
+    log.info('AI 기능 모듈 초기화 완료');
     return true;
   } catch (error) {
-    log.error('❌ AI 기능 모듈 초기화 실패:', error);
+    log.error('AI 기능 모듈 초기화 실패:', error);
     return false;
   }
 }
@@ -811,7 +759,7 @@ function addAIApiRoutes(app) {
       if (captureAudio && audioCapture) {
         try {
           audioData = await audioCapture.captureAudio(3);
-          log.info('🎤 API를 통한 오디오 캡처 완료');
+          log.info('API를 통한 오디오 캡처 완료');
         } catch (error) {
           log.warn('API 오디오 캡처 실패:', error);
         }
@@ -820,7 +768,7 @@ function addAIApiRoutes(app) {
       if (capturePhotos && imageCapture) {
         try {
           photos = await imageCapture.captureMultiplePhotos(5, 500);
-          log.info(`📷 API를 통한 사진 캡처 완료: ${photos.length}장`);
+          log.info(`API를 통한 사진 캡처 완료: ${photos.length}장`);
         } catch (error) {
           log.warn('API 사진 캡처 실패:', error);
         }
@@ -907,10 +855,8 @@ async function processRecognizedCommandWithAI(text, dependencies, emotionData) {
     const aiResponse = await enhanceConversationWithAI(text, dependencies);
     
     if (aiResponse) {
-      // AI가 응답을 생성했으면 그것을 사용
-      log.info('🤖 AI가 대화를 처리함');
+      log.info('AI가 대화를 처리함');
       
-      // TTS로 AI 응답 출력
       if (dependencies.safeTTS) {
         await dependencies.safeTTS(aiResponse);
       }
@@ -955,7 +901,5 @@ module.exports = {
   enhanceConversationWithAI,
   processRecognizedCommandWithAI,
   addAIApiRoutes,
-  
-  // 설정
   AI_SERVER_URL
 };
